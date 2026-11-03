@@ -1,0 +1,8 @@
+node_modules/
+*.bak
+# Your audio files stay on your PC only (they are usually copyrighted).
+library/**/*.mp3
+library/**/*.wav
+library/**/*.ogg
+library/**/*.m4a
+library/**/*.flac

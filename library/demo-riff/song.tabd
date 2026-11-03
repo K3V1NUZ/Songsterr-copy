@@ -1,0 +1,55 @@
+# Original demo riff written for Fretline — shows every TabDown feature:
+# multiple guitars, bass, drums, palm mutes, slides, bends, hammer-ons,
+# repeats with alternate endings, a tempo change and a time-signature change.
+title: Demo Riff
+artist: Fretline
+tempo: 112
+time: 4/4
+# No audio yet — attach one from the Sync panel or drop audio.mp3 here and add:  audio: audio.mp3
+
+track: Rhythm Guitar
+instrument: distortion
+tuning: drop-d
+
+{section Intro} |: e [6:0m 5:0m] [6:0m 5:0m] [6:0m 5:0m] [6:3 5:3] [6:0m 5:0m] [6:0m 5:0m] [6:5 5:5] [6:3 5:3] |
+{ending 1} e [6:0m 5:0m] [6:0m 5:0m] [6:0m 5:0m] [6:3 5:3] q [6:7 5:7 4:7] [6:5 5:5 4:5] :|
+{ending 2} e [6:0m 5:0m] [6:0m 5:0m] [6:0m 5:0m] [6:3 5:3] h [6:10 5:10 4:10] |
+{section Verse} {tempo 120} q [6:0 5:0 4:0] e [6:0m 5:0m] [6:0m 5:0m] q [6:5 5:5 4:5] [6:3 5:3 4:3] |
+q [6:0 5:0 4:0] e [6:0m 5:0m] [6:0m 5:0m] h [6:7 5:7 4:7] |
+{time 2/4} q [6:5 5:5 4:5] [6:3 5:3 4:3] |
+{time 4/4} w [6:0 5:0 4:0 3:2] |
+
+track: Lead Guitar
+instrument: electric
+tuning: drop-d
+
+|: w r |
+{ending 1} w r :|
+{ending 2} q 3:7 e 3:9h 3:10 q 2:10b2 2:10 |
+e 2:8 2:10 1:7 1:8~ q. 1:10b1 e 1:8 |
+s 1:10p 1:8 2:10 2:8 e 3:9 3:7/ q 3:9~ r |
+q 2:8 2:10 |
+w 2:<12>~ |
+
+track: Bass
+instrument: bass
+tuning: bass-drop-d
+
+|: e 4:0 4:0 4:0 4:3 4:0 4:0 4:5 4:3 |
+{ending 1} e 4:0 4:0 4:0 4:3 q 4:7 4:5 :|
+{ending 2} e 4:0 4:0 4:0 4:3 h 4:10 |
+q 4:0 e 4:0 4:0 q 4:5 4:3 |
+q 4:0 e 4:0 4:0 h 4:7 |
+q 4:5 4:3 |
+w 4:0 |
+
+track: Drums
+instrument: drums
+
+|: e [k hh] hh [sn hh] hh [k hh] [k hh] [sn hh] hh |
+{ending 1} e [k hh] hh [sn hh] hh s sn sn t1 t1 t2 t2 ft ft :|
+{ending 2} e [k cr] hh [sn hh] hh h [k cr] |
+e [k rd] rd [sn rd] rd [k rd] [k rd] [sn rd] rd |
+e [k rd] rd [sn rd] rd [k rd] [k rd] [sn! rd] (sn) |
+e [k hh] hh [sn hh] hh |
+w [k cr] |
