@@ -1,19 +1,20 @@
 #!/usr/bin/env node
-// Render a TabDown file to a WAV using the built-in synth.
-//   node tools/render-wav.js song.tabd out.wav [--lead 2.0] [--tempo-scale 0.96] [--rate 22050]
+// Render a score (MusicXML / Guitar Pro) to a WAV using the built-in synth.
+//   node tools/render-wav.js song.musicxml out.wav [--lead 2.0] [--tempo-scale 0.96] [--rate 22050]
 // --lead         seconds of silence before bar 1 (like a real recording's intro gap)
 // --tempo-scale  play slower/faster than the tab tempo (to practise syncing)
 import { readFileSync, writeFileSync } from 'node:fs';
-import { parseTabDown } from '../public/js/tabdown.js';
+import { basename } from 'node:path';
+import { loadScore } from '../public/js/importers/index.js';
 import { buildTimeline, buildNoteEvents } from '../public/js/timeline.js';
 import { pluck, drum, deadNote } from '../public/js/ks.js';
 
 const [inp, out] = process.argv.slice(2);
 const opt = (n, d) => { const i = process.argv.indexOf(n); return i > 0 ? +process.argv[i + 1] : d; };
-if (!inp || !out) { console.log('usage: node tools/render-wav.js in.tabd out.wav [--lead s] [--tempo-scale x] [--rate hz]'); process.exit(2); }
+if (!inp || !out) { console.log('usage: node tools/render-wav.js in.musicxml out.wav [--lead s] [--tempo-scale x] [--rate hz]'); process.exit(2); }
 const lead = opt('--lead', 0), scale = opt('--tempo-scale', 1), sr = opt('--rate', 22050);
-const { song, errors } = parseTabDown(readFileSync(inp, 'utf8'));
-if (errors.length) { console.error(errors); process.exit(1); }
+const { song, errors } = await loadScore(basename(inp), readFileSync(inp));
+if (!song) { console.error(errors); process.exit(1); }
 const tl = buildTimeline(song);
 const events = buildNoteEvents(tl, song);
 const total = Math.ceil((lead + tl.duration / scale + 3) * sr);

@@ -1,11 +1,14 @@
-// Converts classic ASCII tabs (e|---0---3---|) into TabDown.
+import { parseTuning } from './music.js';
+
+// Converts classic ASCII tabs (e|---0---3---|) into a score (import model ->
+// MusicXML via musicxml-writer.js).
 // ASCII tabs have no exact rhythm, so durations are estimated from the
 // horizontal spacing (snapped to a 16th-note grid, each bar filled exactly).
 // Always listen through and fix the rhythm afterwards.
 
 const LINE_RE = /^\s*([A-Ga-g][#b]?\d?)?\s*[|:](.*)$/;
 
-export function asciiToTabDown(text, opts = {}) {
+export function asciiToModel(text, opts = {}) {
   const time = opts.time || [4, 4];
   const tempo = opts.tempo || 100;
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
@@ -19,14 +22,13 @@ export function asciiToTabDown(text, opts = {}) {
     else { if (cur.length >= 4) systems.push(cur); cur = []; }
   }
   if (cur.length >= 4) systems.push(cur);
-  if (!systems.length) return { text: '', error: 'No ASCII tab lines found (expected lines like  e|---0---|)' };
+  if (!systems.length) return { error: 'No ASCII tab lines found (expected lines like  e|---0---|)' };
 
   const strings = systems[0].length;
   const labels = systems[0].map((l) => l.label);
   const barQ = (time[0] * 4) / time[1];
   const barSix = Math.round(barQ * 4);
-  const out = [];
-  let barCount = 0;
+  const bars = [];
   for (const sys of systems) {
     if (sys.length !== strings) continue;
     const width = Math.max(...sys.map((l) => l.body.length));
@@ -51,51 +53,44 @@ export function asciiToTabDown(text, opts = {}) {
           if (/\d/.test(ch) && !/\d/.test(prev)) {
             let num = ch, k = c + 1;
             if (/\d/.test(r[k]) && +(ch + r[k]) <= 30) { num += r[k]; k++; }
-            let mods = '';
+            const note = { string: s + 1, fret: +num };
             const tch = r[k];
-            if (tch === 'h' || tch === 'p') mods += tch;
-            else if (tch === '/' || tch === '\\' || tch === 's') mods += '/';
-            else if (tch === 'b') mods += 'b';
-            else if (tch === '~') mods += '~';
-            notes.push(`${s + 1}:${num}${mods}`);
-          } else if ((ch === 'x' || ch === 'X') && !/[a-z]/i.test(prev || '')) notes.push(`${s + 1}:x`);
+            if (tch === 'h' || tch === 'p') note.legato = true;
+            else if (tch === '/' || tch === '\\' || tch === 's') note.slide = true;
+            else if (tch === 'b') note.bend = 2;
+            else if (tch === '~') note.vibrato = true;
+            notes.push(note);
+          } else if ((ch === 'x' || ch === 'X') && !/[a-z]/i.test(prev || '')) notes.push({ string: s + 1, fret: 0, dead: true });
         }
         if (notes.length) beats.push({ col: c, notes });
       }
       const pos = gridPositions(beats.map((b) => b.col), c0, c1, barSix);
-      const tokens = [];
-      let curDur = null;
-      const emit = (six, what) => {
+      const beatsOut = [];
+      const emit = (six, notes) => {
         for (const [d, tok] of decompose(six)) {
-          if (tok !== curDur) { tokens.push(tok); curDur = tok; }
-          tokens.push(d === 0 ? what : 'r');
+          const dur = { base: tok[0], dots: tok.length - 1, tuplet: 0 };
+          beatsOut.push(d === 0 && notes ? { dur, notes } : { dur, rest: true, notes: [] });
         }
       };
-      if (!beats.length) emit(barSix, 'r');
-      if (beats.length && pos[0] > 0) emit(pos[0], 'r');
+      if (!beats.length) emit(barSix, null);
+      if (beats.length && pos[0] > 0) emit(pos[0], null);
       beats.forEach((b, i) => {
         const end = i + 1 < beats.length ? pos[i + 1] : barSix;
-        const six = Math.max(1, end - pos[i]);
-        const what = b.notes.length === 1 ? b.notes[0] : `[${b.notes.join(' ')}]`;
-        emit(six, what);
+        emit(Math.max(1, end - pos[i]), b.notes);
       });
-      out.push(tokens.join(' ') + ' |');
-      barCount++;
+      bars.push(beatsOut);
     }
   }
-  const tuning = guessTuning(labels, strings);
-  const head = [
-    `title: ${opts.title || 'Imported tab'}`,
-    `artist: ${opts.artist || ''}`,
-    `tempo: ${tempo}`,
-    `time: ${time[0]}/${time[1]}`,
-    '',
-    `track: ${opts.track || (strings === 4 ? 'Bass' : 'Guitar')}`,
-    `instrument: ${strings <= 5 && strings !== 6 ? 'bass' : 'guitar'}`,
-    `tuning: ${tuning}`,
-    '# Rhythm below was GUESSED from the ASCII spacing — check it by ear.',
-  ];
-  return { text: head.join('\n') + '\n' + out.join('\n') + '\n', bars: barCount };
+  const tuning = parseTuning(guessTuning(labels, strings));
+  const bass = strings <= 5 && strings !== 6;
+  return {
+    format: 'ASCII tab',
+    meta: { title: opts.title || 'Imported tab', artist: opts.artist || '', tempo, time },
+    masterBars: bars.map((_, i) => ({ time, tempo })),
+    tracks: [{ name: opts.track || (bass ? 'Bass' : 'Guitar'), instrument: bass ? 'bass' : 'guitar', tuning, capo: 0, bars }],
+    warnings: ['The rhythm was guessed from the spacing of the ASCII tab — check it by ear'],
+    bars: bars.length,
+  };
 }
 
 // Estimate 16th-grid positions from column spacing: the most common gap

@@ -15,8 +15,8 @@
       <span id="songLabel">Search your tabs…</span>
     </button>
     <div class="top-actions">
-      <button class="ghost" id="btnImport" title="Import a TabDown file or ASCII tab">Import</button>
-      <button class="ghost" id="btnEdit" title="Edit the TabDown source of this song">Edit</button>
+      <button class="ghost" id="btnImport" title="Add a MusicXML or Guitar Pro file">Import</button>
+      <button class="ghost" id="btnEdit" title="Edit the MusicXML source of this song">Edit</button>
       <button class="ghost" id="btnHelp" title="Keyboard shortcuts & format help">?</button>
     </div>
   </header>
@@ -26,7 +26,7 @@
     <div id="tab"></div>
     <div class="empty" id="empty">
       <h2>Your personal tab library</h2>
-      <p>Click the search bar to open a song, or <b>Import</b> a <code>.tabd</code> file.</p>
+      <p>Click the search bar to open a song, or <b>Import</b> a MusicXML or Guitar Pro file.</p>
     </div>
   </main>
 
@@ -81,7 +81,7 @@
       <ul class="results" id="results"></ul>
       <div class="sheet-foot">
         <button class="ghost" id="btnImport2">+ Import new song</button>
-        <label class="ghost file-btn">Open local files…<input type="file" id="localFiles" multiple accept=".tabd,.txt,audio/*"></label>
+        <label class="ghost file-btn">Open local files…<input type="file" id="localFiles" multiple accept=".musicxml,.xml,.mxl,.gp,.gp3,.gp4,.gp5,.gpx,.json,audio/*"></label>
       </div>
     </div>
   </div>
@@ -91,30 +91,33 @@
     <div class="sheet wide-sheet">
       <div class="sheet-head"><h3>Import a song</h3><button class="x" data-close>×</button></div>
       <div class="tabs">
-        <button class="tab on" data-pane="paneTabd">TabDown (.tabd)</button>
-        <button class="tab" data-pane="paneScore">Guitar Pro / MusicXML</button>
-        <button class="tab" data-pane="paneAscii">Convert ASCII tab</button>
+        <button class="tab on" data-pane="paneFile">MusicXML / Guitar Pro file</button>
+        <button class="tab" data-pane="panePaste">Paste MusicXML</button>
         <button class="tab" data-pane="paneAI">Convert with AI</button>
+        <button class="tab" data-pane="paneAscii">Convert ASCII tab</button>
       </div>
-      <div class="pane on" id="paneTabd">
-        <p class="hint">Paste TabDown text or choose a <code>.tabd</code> file. Errors and bar-length warnings are shown live.</p>
-        <label class="ghost file-btn">Choose .tabd file…<input type="file" id="tabdFile" accept=".tabd,.txt"></label>
-        <textarea id="importText" spellcheck="false" placeholder="title: My Song&#10;artist: Someone&#10;tempo: 120&#10;time: 4/4&#10;&#10;track: Guitar&#10;tuning: standard&#10;q 6:0 6:3 6:5 r | ..."></textarea>
-        <div class="issues" id="importIssues"></div>
-        <div class="row"><span>Audio file (optional):</span> <input type="file" id="importAudio" accept="audio/*"></div>
-      </div>
-      <div class="pane" id="paneScore">
+      <div class="pane on" id="paneFile">
         <label class="dropzone" id="scoreDrop">
-          <input type="file" id="scoreFile" accept=".gp,.gp3,.gp4,.gp5,.gpx,.musicxml,.xml,.mxl">
+          <input type="file" id="scoreFile" accept=".musicxml,.xml,.mxl,.gp,.gp3,.gp4,.gp5,.gpx">
           <svg viewBox="0 0 24 24" width="34" height="34"><path d="M12 15V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <b>Drop a Guitar Pro or MusicXML file here</b>
-          <span>or click to choose · .gp3 .gp4 .gp5 .gpx .gp · .musicxml .xml .mxl</span>
+          <b>Drop a MusicXML or Guitar Pro file here</b>
+          <span>or click to choose · .musicxml .xml .mxl · .gp3 .gp4 .gp5 .gpx .gp</span>
         </label>
         <div id="scoreInfo" class="score-info"></div>
-        <p class="hint">Exact rhythms and techniques are kept. Files without tab data (plain sheet music) get string/fret positions worked out automatically.</p>
+        <p class="hint">The file is stored in your library as it is. Exported from MuseScore, Guitar Pro, TuxGuitar or written by an AI — all the same. Sheet music without tab data gets string/fret positions worked out automatically.</p>
+      </div>
+      <div class="pane" id="panePaste">
+        <p class="hint">Paste the MusicXML an AI gave you (or any MusicXML text). Problems — broken XML, bars that don't add up, pitches that don't match the frets — are listed live; click one to jump to its line.</p>
+        <textarea id="importText" spellcheck="false" placeholder="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&#10;&lt;score-partwise version=&quot;4.0&quot;&gt; …"></textarea>
+        <div class="issues" id="importIssues"></div>
+      </div>
+      <div class="pane" id="paneAI">
+        <p class="hint">Give an AI assistant the link to a tab (or screenshots of it) together with this prompt. It answers with a MusicXML file — paste it under <b>Paste MusicXML</b>, or save it as <code>.musicxml</code> and drop it in.</p>
+        <textarea id="aiPrompt" readonly spellcheck="false"></textarea>
+        <button class="primary" id="btnCopyPrompt">Copy prompt</button>
       </div>
       <div class="pane" id="paneAscii">
-        <p class="hint">Paste a classic ASCII tab (<code>e|---0---3---|</code>). Notes are exact, the <b>rhythm is estimated</b> from spacing — fix it in the editor afterwards.</p>
+        <p class="hint">Paste a classic ASCII tab (<code>e|---0---3---|</code>). It is converted to MusicXML. Notes are exact; the <b>rhythm is estimated</b> from the spacing.</p>
         <div class="row">
           <span>Title</span><input id="asciiTitle" placeholder="Song title">
           <span>Artist</span><input id="asciiArtist" placeholder="Artist">
@@ -122,27 +125,26 @@
           <span>Time</span><input id="asciiTime" value="4/4" style="width:60px">
         </div>
         <textarea id="asciiText" spellcheck="false" placeholder="e|-----0-----|-----------|&#10;B|---1---1---|---3---3---|&#10;G|-2-------2-|-0-------0-|&#10;D|-----------|-----------|&#10;A|-0---------|-----------|&#10;E|-----------|-3---------|"></textarea>
-        <button class="primary" id="btnAsciiConvert">Convert → TabDown</button>
+        <button class="primary" id="btnAsciiConvert">Convert → MusicXML</button>
       </div>
-      <div class="pane" id="paneAI">
-        <p class="hint">Give an AI assistant the link to a tab (or screenshots of it) together with this prompt. It returns a <code>.tabd</code> file you paste in the first tab.</p>
-        <textarea id="aiPrompt" readonly spellcheck="false"></textarea>
-        <button class="primary" id="btnCopyPrompt">Copy prompt</button>
+      <div class="sheet-foot" id="importFoot">
+        <span class="hint" style="margin-right:auto">Audio file (optional): <input type="file" id="importAudio" accept="audio/*"></span>
+        <button class="primary" id="btnDoImport">Add to library</button>
       </div>
-      <div class="sheet-foot"><button class="primary" id="btnDoImport">Import</button></div>
     </div>
   </div>
 
   <!-- editor modal -->
   <div class="modal" id="editModal">
     <div class="sheet wide-sheet">
-      <div class="sheet-head"><h3>Edit TabDown source</h3><button class="x" data-close>×</button></div>
+      <div class="sheet-head"><h3>Edit MusicXML source</h3><button class="x" data-close>×</button></div>
+      <p class="hint" id="editNote" style="padding: 0 22px"></p>
       <textarea id="editText" spellcheck="false"></textarea>
       <div class="issues" id="editIssues"></div>
       <div class="sheet-foot">
-        <a class="ghost" href="docs/TABDOWN_SPEC.md" target="_blank">Format reference</a>
+        <a class="ghost" href="docs/AI_CONVERSION_PROMPT.md" target="_blank">MusicXML cheat sheet</a>
         <button class="ghost" id="btnEditApply">Preview</button>
-        <button class="ghost" id="btnEditDownload">Download .tabd</button>
+        <button class="ghost" id="btnEditDownload">Download .musicxml</button>
         <button class="primary" id="btnEditSave">Save to library</button>
       </div>
     </div>
@@ -197,7 +199,7 @@
         <tr><td><kbd>K</kbd></td><td>Tap bar (sync)</td><td><kbd>F</kbd></td><td>Follow cursor</td></tr>
       </table>
       <p class="hint">Click a note/bar to jump there. Drag across bars to loop them. Shift-click extends the loop.</p>
-      <p class="hint">Format reference: <a href="docs/TABDOWN_SPEC.md" target="_blank">TabDown spec</a> · <a href="docs/AI_CONVERSION_PROMPT.md" target="_blank">AI conversion prompt</a></p>
+      <p class="hint">Songs are standard MusicXML or Guitar Pro files. <a href="docs/AI_CONVERSION_PROMPT.md" target="_blank">AI conversion prompt &amp; MusicXML cheat sheet</a></p>
     </div>
   </div>
 

@@ -1,125 +1,144 @@
 #!/usr/bin/env node
-// Quick sanity tests for the parser, repeat expansion, sync mapping and ASCII converter.
+// Sanity tests: importers (MusicXML + Guitar Pro 3-8), the MusicXML writer,
+// repeat expansion, audio sync mapping and the ASCII converter.
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { parseTabDown, setHeaderLine } from '../public/js/tabdown.js';
+import { readFileSync, readdirSync } from 'node:fs';
+import { loadScore, importScoreFile, modelToMusicXML } from '../public/js/importers/index.js';
+import { durationQuarters, noteToMidi, parseTuning } from '../public/js/music.js';
 import { buildTimeline, playOrder, makeSyncMap, buildNoteEvents } from '../public/js/timeline.js';
-import { asciiToTabDown } from '../public/js/ascii.js';
-import { importScoreFile, modelToTabDown } from '../public/js/importers/index.js';
+import { asciiToModel } from '../public/js/ascii.js';
 
 let n = 0;
 const test = async (name, fn) => { await fn(); n++; console.log('  ✓ ' + name); };
+const enc = (s) => new TextEncoder().encode(s);
+const load = async (file) => loadScore(file, readFileSync(file));
+const STD = '<clef><sign>TAB</sign><line>5</line></clef><staff-details><staff-lines>6</staff-lines>' +
+  [['E', 2], ['A', 2], ['D', 3], ['G', 3], ['B', 3], ['E', 4]].map(([st, o], i) => `<staff-tuning line="${i + 1}"><tuning-step>${st}</tuning-step><tuning-octave>${o}</tuning-octave></staff-tuning>`).join('') + '</staff-details>';
+const xml = (measures, { attrs = '<divisions>2</divisions><time><beats>4</beats><beat-type>4</beat-type></time>' + STD, head = '' } = {}) => enc(
+  `<score-partwise><part-list><score-part id="P1"><part-name>Guitar</part-name></score-part></part-list>
+   <part id="P1">${measures.map((m, i) => `<measure number="${i + 1}">${i === 0 ? `<attributes>${attrs}</attributes>${head}` : ''}${m}</measure>`).join('')}</part></score-partwise>`);
+const tabNote = (s, f, dur = 2, extra = '') => `<note><duration>${dur}</duration><notations><technical><string>${s}</string><fret>${f}</fret>${extra}</technical></notations></note>`;
 
-await test('parses notes, chords, durations, techniques', () => {
-  const { song, errors } = parseTabDown('tempo: 60\ntrack: G\nq 6:0 e [5:2 4:2] 3:5h s 3:7 3:x q. 2:<12>~ |');
-  assert.deepEqual(errors, []);
-  const b = song.tracks[0].bars[0].beats;
-  assert.equal(b.length, 6);
-  assert.equal(b[0].notes[0].midi, 40);          // low E
-  assert.equal(b[1].notes.length, 2);
-  assert.equal(b[2].notes[0].hammer, true);
-  assert.equal(b[4].notes[0].dead, true);
-  assert.equal(b[5].q, 1.5);
-});
-await test('string 1 is the highest string', () => {
-  const { song } = parseTabDown('track: G\nw 1:0 |');
-  assert.equal(song.tracks[0].bars[0].beats[0].notes[0].midi, 64); // E4
-});
-await test('reports errors with line numbers', () => {
-  const { errors } = parseTabDown('track: G\nq 7:0 1:0 1:0 1:0 |\nq 2:3z |');
-  assert.equal(errors.length, 2);
-  assert.equal(errors[0].line, 2);
-  assert.equal(errors[1].line, 3);
-});
-await test('warns about wrong bar lengths', () => {
-  const { warnings } = parseTabDown('time: 3/4\ntrack: G\nq 1:0 1:0 1:0 1:0 |');
-  assert.equal(warnings.length, 1);
+// one signature string per bar, used to compare whole songs
+const TECH = ['tie', 'dead', 'ghost', 'harmonic', 'hammer', 'pull', 'slide', 'bend', 'vibrato', 'palmMute', 'accent', 'letRing'];
+const signature = (song, tech = TECH) => song.tracks.map((t) => t.bars.map((b) => b.beats.every((bt) => bt.rest) ? 'rest' : b.beats.map((bt) =>
+  `${bt.dur.base}${bt.dur.dots}${bt.dur.tuplet}:` + (bt.rest ? 'r' : bt.notes.map((x) => x.drum ||
+    `${x.string}/${x.fret}/${tech.filter((f) => x[f]).join(',')}`).sort().join('+'))).join(' ')));
+const masters = (song) => song.masterBars.map((m) => [m.time, m.tempo, m.section ?? null, !!m.repeatStart, !!m.repeatEnd, m.repeatEnd ? m.repeatTimes || 2 : 0, m.ending ?? null]);
+
+await test('music helpers', () => {
+  assert.equal(durationQuarters('q', 1), 1.5);
+  assert.equal(durationQuarters('e', 0, 3), 1 / 3);
+  assert.equal(noteToMidi('E2'), 40);
+  assert.deepEqual(parseTuning('drop-d'), [38, 45, 50, 55, 59, 64]);
 });
 await test('repeats and endings expand correctly', () => {
   assert.deepEqual(playOrder([{ repeatStart: 1 }, { repeatEnd: 1, repeatTimes: 3 }, {}]), [0, 1, 0, 1, 0, 1, 2]);
   assert.deepEqual(playOrder([{ repeatStart: 1 }, { ending: [1], repeatEnd: 1 }, { ending: [2] }, {}]), [0, 1, 0, 2, 3]);
 });
-await test('sync map: offset and anchors', () => {
-  const { song } = parseTabDown('tempo: 60\ntime: 4/4\noffset: 2\ntrack: G\nw r | w r | w r |');
+await test('sync map: offset and anchors', async () => {
+  const { song } = await loadScore('t.musicxml', xml(['<note><rest measure="yes"/><duration>8</duration></note>', '', ''], { head: '<sound tempo="60"/>' }));
+  song.meta.offset = 2;
   let m = makeSyncMap(buildTimeline(song), song.meta);
   assert.equal(m.toAudio(0), 2);
   assert.equal(m.toScore(6), 4);
   song.meta.sync = [{ bar: 1, time: 1 }, { bar: 3, time: 11 }]; // 8 s of score -> 10 s of audio
   m = makeSyncMap(buildTimeline(song), song.meta);
   assert.equal(m.toAudio(4), 6);
-  assert.equal(m.toAudio(12), 16);                // extrapolated
+  assert.equal(m.toAudio(12), 16);
   assert.ok(Math.abs(m.toScore(m.toAudio(5.3)) - 5.3) < 1e-9);
 });
-await test('ties extend the previous note', () => {
-  const { song } = parseTabDown('tempo: 60\ntrack: G\nh 3:5 3:- |');
+await test('ties extend the previous note', async () => {
+  const { song } = await loadScore('t.musicxml', xml([
+    `<note><duration>4</duration><tie type="start"/><type>half</type><notations><technical><string>3</string><fret>5</fret></technical></notations></note>
+     <note><duration>4</duration><tie type="stop"/><type>half</type><notations><technical><string>3</string><fret>5</fret></technical></notations></note>`], { head: '<sound tempo="60"/>' }));
   const ev = buildNoteEvents(buildTimeline(song), song);
   assert.equal(ev.length, 1);
   assert.equal(ev[0].dur, 4);
 });
-await test('setHeaderLine inserts and replaces', () => {
-  let t = 'title: X\ntempo: 90\n\ntrack: G\nq 1:0 |';
-  t = setHeaderLine(t, 'sync', '1@2.000');
-  assert.match(t, /tempo: 90\nsync: 1@2.000\n/);
-  t = setHeaderLine(t, 'sync', '1@3.000');
-  assert.equal((t.match(/sync:/g) || []).length, 1);
-  t = setHeaderLine(t, 'sync', null);
-  assert.ok(!t.includes('sync:'));
-});
-await test('ASCII tab conversion fills bars exactly', () => {
-  const r = asciiToTabDown('e|-0-0-0-0-|\nB|---------|\nG|---------|\nD|---------|\nA|---------|\nE|---------|');
-  const { errors, warnings } = parseTabDown(r.text);
-  assert.deepEqual(errors, []); assert.deepEqual(warnings, []);
-});
-await test('all library songs parse without errors', () => {
+await test('library songs load without problems', async () => {
   for (const d of readdirSync('library')) {
-    const f = `library/${d}/song.tabd`;
-    if (!existsSync(f)) continue;
-    const { errors, warnings } = parseTabDown(readFileSync(f, 'utf8'));
-    assert.deepEqual(errors, [], f); assert.deepEqual(warnings, [], f);
+    const r = await load(`library/${d}/song.musicxml`);
+    assert.deepEqual(r.errors, [], d); assert.deepEqual(r.warnings, [], d);
+  }
+});
+await test('MusicXML writer round-trips the library songs exactly', async () => {
+  for (const d of readdirSync('library')) {
+    const a = await load(`library/${d}/song.musicxml`);
+    const b = await loadScore('x.musicxml', enc(modelToMusicXML(a.model)));
+    assert.deepEqual(b.errors, []); assert.deepEqual(b.warnings, []);
+    assert.deepEqual(signature(b.song), signature(a.song), d);
+    assert.deepEqual(masters(b.song), masters(a.song), d);
   }
 });
 
-// ---- importers: fixtures were made from library/demo-riff and library/greensleeves
-// (GP3-5 with PyGuitarPro, GP6/7 + MusicXML with independent writers); importing
-// them must give back exactly the same notes as the original TabDown file.
-const signature = (song) => song.tracks.map((t) => t.bars.map((b) => b.beats.map((bt) =>
-  `${bt.dur.base}${bt.dur.dots}${bt.dur.tuplet}:` + (bt.rest ? 'r' : bt.notes.map((x) => x.drum ||
-    `${x.string}/${x.tie ? '-' : x.dead ? 'x' : x.fret}/${['hammer', 'pull', 'slide', 'bend', 'palmMute', 'vibrato', 'harmonic', 'ghost'].filter((f) => x[f]).join(',')}`).sort().join('+'))).join(' ')));
-const strip = (sig, feats) => sig.map((t) => t.map((bar) => feats ? bar : bar.replace(/\/[a-zA-Z,]*(?=[+ ]|$)/g, '/')));
-for (const [file, orig, notech] of [
-  ['demo-riff.gp3', 'demo-riff', true], ['demo-riff.gp4', 'demo-riff'], ['demo-riff.gp5', 'demo-riff'], ['demo-riff-v500.gp5', 'demo-riff'],
-  ['demo-riff.gpx', 'demo-riff'], ['demo-riff.gp', 'demo-riff'], ['greensleeves.mxl', 'greensleeves', true],
+// Fixtures were made from the library songs: GP3-5 written by PyGuitarPro, GP6/7
+// by a separate GPIF generator, .mxl by music21. Each must give back the same notes.
+const reference = {
+  'demo-riff': (await load('library/demo-riff/song.musicxml')).song,
+  greensleeves: (await load('library/greensleeves/song.musicxml')).song,
+};
+for (const [file, ref, tech] of [
+  ['demo-riff.gp3', 'demo-riff', ['tie', 'dead', 'ghost', 'hammer', 'pull', 'slide', 'bend', 'accent']], // GP3 has no P.M./vibrato/harmonic per note
+  ['demo-riff.gp4', 'demo-riff'], ['demo-riff.gp5', 'demo-riff'], ['demo-riff-v500.gp5', 'demo-riff'],
+  ['demo-riff.gpx', 'demo-riff'], ['demo-riff.gp', 'demo-riff'],
+  ['greensleeves.mxl', 'greensleeves', ['tie', 'accent']], // music21 does not write hammer-ons
 ]) {
-  await test(`import ${file} round-trips exactly`, async () => {
-    const model = await importScoreFile(file, readFileSync(`tests/fixtures/${file}`));
-    const { text } = modelToTabDown(model);
-    const res = parseTabDown(text);
-    assert.deepEqual(res.errors, []); assert.deepEqual(res.warnings, []);
-    const a = parseTabDown(readFileSync(`library/${orig}/song.tabd`, 'utf8')).song;
-    const gp3 = file.endsWith('.gp3'); // GP3 has no palm mute / vibrato / harmonic flags per note
-    const norm = (song) => signature(song).map((t) => t.map((bar) => gp3 ? bar.replace(/palmMute,?|vibrato,?|harmonic,?/g, '').replace(/,(?=\+| |$)/g, '') : bar));
-    if (notech) {
-      assert.deepEqual(strip(norm(res.song), false), strip(norm(a), false));
-      if (gp3) assert.deepEqual(norm(res.song), norm(a));
-    } else assert.deepEqual(signature(res.song), signature(a));
-    assert.deepEqual(res.song.masterBars.map((m) => [m.time, m.tempo, m.section, !!m.repeatEnd, m.ending]),
-      a.masterBars.map((m) => [m.time, m.tempo, m.section, !!m.repeatEnd, m.ending]));
+  await test(`import ${file} matches the original exactly`, async () => {
+    const r = await load(`tests/fixtures/${file}`);
+    assert.deepEqual(r.errors, []);
+    assert.deepEqual(signature(r.song, tech), signature(reference[ref], tech));
+    assert.deepEqual(masters(r.song), masters(reference[ref]));
   });
 }
 await test('MusicXML: tab staff, tuning and techniques', async () => {
-  const model = await importScoreFile('t.musicxml', readFileSync('tests/fixtures/techniques.musicxml'));
-  const { text } = modelToTabDown(model);
-  assert.match(text, /tuning: drop-d/);
-  assert.match(text, /\|: \{section Intro\} q 3:7h 3:9 e \[5:0 6:0\] r q 2:7b~ \| \{ending 1\} h 2:- 4:9\/ :\|/);
-  assert.match(text, /\{ending 2\} q3 4:9 4:7 4:5 h 6:x \|/);
+  const r = await load('tests/fixtures/techniques.musicxml');
+  assert.deepEqual(r.errors, []); assert.deepEqual(r.warnings, []);
+  const t = r.song.tracks[0];
+  assert.deepEqual(t.tuning, parseTuning('drop-d'));
+  assert.deepEqual(signature(r.song)[0], [
+    'q00:3/7/hammer q00:3/9/ e00:5/0/+6/0/ e00:r q00:2/7/bend,vibrato',
+    'h00:2/7/tie h00:4/9/slide',
+    'q03:4/9/ q03:4/7/ q03:4/5/ h00:6/0/dead',
+  ]);
+  assert.deepEqual(masters(r.song).map((m) => [m[2], m[3], m[4], m[6]]), [['Intro', true, false, null], [null, false, true, [1]], [null, false, false, [2]]]);
 });
-await test('MusicXML without tab data gets playable frets', async () => {
-  const model = await importScoreFile('t.xml', Buffer.from(`<score-partwise><part-list><score-part id="P1"><part-name>Guitar</part-name></score-part></part-list>
-    <part id="P1"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
-    <note><pitch><step>E</step><octave>2</octave></pitch><duration>2</duration><type>half</type></note>
-    <note><pitch><step>G</step><octave>3</octave></pitch><duration>2</duration><type>half</type></note>
-    <note><chord/><pitch><step>B</step><octave>3</octave></pitch><duration>2</duration><type>half</type></note></measure></part></score-partwise>`));
-  const { text } = modelToTabDown(model);
-  assert.match(text, /h 6:0 \[(3:0 2:0|2:0 3:0)\] \|/);
+await test('minimal AI-style MusicXML (no <pitch>, no <type>) loads', async () => {
+  const r = await loadScore('ai.musicxml', xml([tabNote(6, 0) + tabNote(6, 3) + tabNote(5, 0, 1) + tabNote(5, 2, 1) + tabNote(5, 3)]));
+  assert.deepEqual(r.errors, []); assert.deepEqual(r.warnings, []);
+  assert.deepEqual(signature(r.song)[0], ['q00:6/0/ q00:6/3/ e00:5/0/ e00:5/2/ q00:5/3/']);
+});
+await test('reports bars that do not add up, with line numbers', async () => {
+  const r = await loadScore('bad.musicxml', xml([tabNote(6, 0) + tabNote(6, 3)]));
+  assert.equal(r.warnings.length, 1);
+  assert.match(r.warnings[0].msg, /bar 1: notes add up to 2 quarters but 4\/4 needs 4 quarters/);
+  assert.ok(r.warnings[0].line > 0);
+});
+await test('reports broken XML with line numbers', async () => {
+  const r = await loadScore('broken.musicxml', enc('<score-partwise>\n<part-list><score-part id="P1"><part-name>G</part-name></score-part></part-list>\n<part id="P1"><measure number="1">\n<note><duration>8</duration></measure></part></score-partwise>'));
+  assert.ok(r.errors.some((e) => e.line === 4 && /<note> is never closed/.test(e.msg)));
+});
+await test('warns when <pitch> does not match string/fret', async () => {
+  const note = '<note><pitch><step>C</step><octave>4</octave></pitch><duration>8</duration><notations><technical><string>1</string><fret>0</fret></technical></notations></note>';
+  const r = await loadScore('p.musicxml', xml([note]));
+  assert.match(r.warnings[0].msg, /does not match string 1 fret 0 \(expected E4\)/);
+});
+await test('sheet music without tab data gets playable frets', async () => {
+  const r = await loadScore('t.xml', xml([
+    `<note><pitch><step>E</step><octave>2</octave></pitch><duration>4</duration><type>half</type></note>
+     <note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration><type>half</type></note>
+     <note><chord/><pitch><step>B</step><octave>3</octave></pitch><duration>4</duration><type>half</type></note>`]));
+  assert.deepEqual(signature(r.song)[0], ['h00:6/0/ h00:2/0/+3/0/']);
+});
+await test('ASCII tab -> MusicXML fills bars exactly', async () => {
+  const model = asciiToModel('e|-0-0-0-0-|\nB|-------3-|\nG|---------|\nD|---------|\nA|---------|\nE|---------|');
+  const r = await loadScore('a.musicxml', enc(modelToMusicXML(model)));
+  assert.deepEqual(r.errors, []); assert.deepEqual(r.warnings, []);
+  assert.deepEqual(signature(r.song)[0], ['q00:1/0/ q00:1/0/ q00:1/0/ q00:1/0/+2/3/']);
+});
+await test('Guitar Pro model keeps track names and tunings', async () => {
+  const m = await importScoreFile('x.gp5', readFileSync('tests/fixtures/demo-riff.gp5'));
+  assert.deepEqual(m.tracks.map((t) => t.name), ['Rhythm Guitar', 'Lead Guitar', 'Bass', 'Drums']);
+  assert.deepEqual(m.tracks[0].tuning, parseTuning('drop-d'));
 });
 console.log(`\n${n} tests passed`);

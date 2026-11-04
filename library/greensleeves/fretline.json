@@ -1,0 +1,15 @@
+{
+  "audio": "audio.wav",
+  "offset": 2,
+  "sync": [
+    {
+      "bar": 1,
+      "time": 2
+    },
+    {
+      "bar": 33,
+      "time": 62
+    }
+  ],
+  "key": "A minor"
+}

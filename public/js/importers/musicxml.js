@@ -7,6 +7,7 @@ import { durFromValue, instrumentFromProgram, Warnings, restsFor } from './model
 
 const TYPE_VALUES = { whole: 1, half: 2, quarter: 4, eighth: 8, '16th': 16, '32nd': 32, '64th': 64, '128th': 128, breve: 1, long: 1 };
 const STEP = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const midiName = (m) => ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][m % 12] + (Math.floor(m / 12) - 1);
 const SECTION_RE = /^(intro|verse|chorus|pre-?chorus|bridge|solo|outro|interlude|riff|break|coda|refrain|theme|[A-H]\d?|part\s*\w+|section\s*\w+)\b/i;
 // drum display position -> GM note (fallback when the file has no instrument mapping)
 const DRUM_POS = { E4: 36, F4: 36, D4: 44, A4: 41, B4: 45, C5: 38, D5: 45, E5: 48, F5: 51, G5: 42, A5: 49, B5: 52 };
@@ -27,8 +28,9 @@ export function isMusicXmlText(text) { return /<score-partwise|<score-timewise/.
 export function parseMusicXML(text) {
   const x = parseXML(text);
   if (x.name === 'score-timewise') throw new Error('“score-timewise” MusicXML is not supported — re-export as standard (partwise) MusicXML');
-  if (x.name !== 'score-partwise') throw new Error('Not a MusicXML score');
+  if (x.name !== 'score-partwise') throw new Error('Not a MusicXML score' + (x.errors?.length ? ` (line ${x.errors[0].line}: ${x.errors[0].msg})` : ''));
   const warn = new Warnings();
+  const lineWarnings = [];
   const creators = x.find('identification')?.all('creator') || [];
   const meta = {
     title: x.t('work/work-title') || x.t('movement-title') || 'Untitled',
@@ -88,14 +90,15 @@ export function parseMusicXML(text) {
     const lowest = tuning ? Math.min(...tuning) : 40;
     let instrument = instrumentFromProgram(info.program, { strings: tuning?.length || 6, name: info.name, drums, lowest });
     if (!drums && !tuning && !hasTechnical && instrument === 'guitar' && info.program < 0 && !/gu?i?ta?r|gtr/i.test(info.name)) instrument = 'keys';
-    const track = { name: info.name, instrument, tuning: tuning || [], capo: capoByStaff[useStaff] || 0, drums, bars: [] };
+    const track = { name: info.name, instrument, tuning: tuning || [], capo: capoByStaff[useStaff] || 0, drums, bars: [], barLines: [] };
     if (!drums && !hasTechnical) warn.add(`${info.name}: no tab data in the file — string/fret positions were worked out from the pitches`);
 
     // --- read measures ---
     let divisions = 1, time = [4, 4], transpose = 0;
     let ending = null;
     measures.forEach((m, mi) => {
-      const mb = masterBars[mi] || (masterBars[mi] = { time });
+      const mb = masterBars[mi] || (masterBars[mi] = { time, line: m.line });
+      track.barLines.push(m.line);
       let cursor = 0, lastStart = 0;
       const beats = [];
       let endingStopsHere = false;
@@ -153,7 +156,17 @@ export function parseMusicXML(text) {
           if (c.has('rest')) { if (!beat.notes.length) beat.rest = true; continue; }
           beat.rest = false;
           const note = readNote(c, { drums, info, transpose, warn });
-          if (note) beat.notes.push(note);
+          if (note) {
+            beat.notes.push(note);
+            // help AI-written files: pitch should agree with string/fret
+            if (note.string != null && tuning && note.pitchMidi != null) {
+              const expect = tuning[tuning.length - note.string] + track.capo + note.fret;
+              if (expect !== note.pitchMidi && expect - 12 !== note.pitchMidi) {
+                lineWarnings.push({ line: c.line, msg: `${info.name}, bar ${mi + 1}: <pitch> does not match string ${note.string} fret ${note.fret} (expected ${midiName(expect)})` });
+              }
+            }
+            delete note.pitchMidi;
+          }
         }
       }
       if (pi === 0) {
@@ -189,7 +202,8 @@ export function parseMusicXML(text) {
   meta.tempo = cur;
   for (const mb of masterBars) { if (mb.tempo) cur = mb.tempo; else mb.tempo = cur; }
   meta.time = masterBars[0]?.time || [4, 4];
-  return { format: 'MusicXML', meta, masterBars, tracks, warnings: warn };
+  const warnings = [...warn.list().map((msg) => ({ line: 0, msg })), ...lineWarnings.slice(0, 50)];
+  return { format: 'MusicXML', meta, masterBars, tracks, warnings, errors: x.errors || [] };
 }
 
 function readNote(c, { drums, info, transpose, warn }) {
@@ -207,6 +221,8 @@ function readNote(c, { drums, info, transpose, warn }) {
   } else if (tech?.has('fret') && tech?.has('string')) {
     note.string = tech.num('string');
     note.fret = tech.num('fret');
+    const p = c.child('pitch');
+    if (p) note.pitchMidi = (p.num('octave') + 1) * 12 + (STEP[p.t('step')] ?? 0) + Math.round(p.num('alter', 0)) + transpose;
   } else {
     const p = c.child('pitch');
     if (!p) return null;
@@ -219,7 +235,10 @@ function readNote(c, { drums, info, transpose, warn }) {
     const bend = tech.child('bend');
     if (bend) note.bend = Math.max(1, Math.round(Math.abs(bend.num('bend-alter', 2))));
     if (tech.has('harmonic')) note.harmonic = true;
+    if (tech.all('other-technical').some((o) => /let\s*ring/i.test(o.t()))) note.letRing = true;
+    if (tech.all('other-technical').some((o) => /p\.?\s*m\.?|palm/i.test(o.t()))) note.palmMute = true;
   }
+  if (/palm/i.test(c.t('play/mute'))) note.palmMute = true;
   if (nots && (nots.all('slide').some((s) => s.attr('type') === 'start') || nots.all('glissando').some((s) => s.attr('type') === 'start'))) note.slide = true;
   const orn = nots?.child('ornaments');
   if (orn && (orn.has('vibrato') || orn.all('wavy-line').some((w) => w.attr('type') === 'start'))) note.vibrato = true;

@@ -1,6 +1,6 @@
 // Renders one track of a parsed song as tablature rows (SVG), handles the
 // moving cursor, bar highlighting, click-to-seek and drag-to-loop.
-import { DRUMS, DRUM_ORDER, midiToName } from './tabdown.js';
+import { DRUMS, DRUM_ORDER, midiToName } from './music.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const el = (tag, attrs = {}, parent) => {
@@ -49,7 +49,7 @@ export class TabView {
     } else this.lines = this.track.tuning.map((m) => midiToName(m, false)).reverse(); // high string first
     const Z = this.zoom;
     const L = {
-      gap: 13 * Z, top: 50 * Z, rhythm: 36 * Z, bottom: 14 * Z, left: 30,
+      gap: 12 * Z, top: 46 * Z, rhythm: 32 * Z, bottom: 8 * Z, left: 30, leftRest: 6,
     };
     L.tabH = (this.lines.length - 1) * L.gap;
     L.rowH = L.top + L.tabH + L.rhythm + L.bottom;
@@ -61,17 +61,18 @@ export class TabView {
       const mb = song.masterBars[i];
       const prev = song.masterBars[i - 1];
       const showTime = !prev || prev.time[0] !== mb.time[0] || prev.time[1] !== mb.time[1];
-      const lead = (showTime ? 22 : 0) * Z + (mb.repeatStart ? 10 : 0) + 12 * Z;
-      const beatW = bar.beats.map((b) => (b.fullRest ? 60 : 16 + 26 * Math.pow(b.q, 0.6)) * Z);
-      const w = lead + beatW.reduce((a, b) => a + b, 0) + 6 * Z + (mb.repeatEnd ? 10 : 0);
+      const lead = (showTime ? 20 : 0) * Z + (mb.repeatStart ? 10 : 0) + 8 * Z;
+      const beatW = bar.beats.map((b) => (b.fullRest ? 44 : 12 + 19 * Math.pow(b.q, 0.55)) * Z);
+      const w = lead + beatW.reduce((a, b) => a + b, 0) + 4 * Z + (mb.repeatEnd ? 10 : 0);
       return { i, bar, mb, showTime, lead, beatW, w };
     });
     // pack rows
     const rows = [];
     let cur = [], cw = 0;
-    const avail = width - L.left;
+    // tuning labels are shown on the first row only; later rows start further left
+    const leftOf = (ri) => (ri === 0 ? L.left : L.leftRest);
     for (const b of bars) {
-      if (cur.length && cw + b.w > avail) { rows.push(cur); cur = []; cw = 0; }
+      if (cur.length && cw + b.w > width - leftOf(rows.length)) { rows.push(cur); cur = []; cw = 0; }
       cur.push(b); cw += b.w;
     }
     if (cur.length) rows.push(cur);
@@ -81,7 +82,9 @@ export class TabView {
     rows.forEach((rowBars, ri) => {
       const total = rowBars.reduce((a, b) => a + b.w, 0);
       const isLast = ri === rows.length - 1;
-      const scale = isLast ? Math.min(1.25, avail / total) : avail / total;
+      const left = leftOf(ri);
+      const avail = width - left;
+      const scale = isLast ? Math.min(1.15, avail / total) : avail / total;
       const svg = el('svg', { width, height: L.rowH, class: 'row' });
       const rowDiv = document.createElement('div');
       rowDiv.className = 'row-wrap';
@@ -89,15 +92,17 @@ export class TabView {
       this.rowsEl.appendChild(rowDiv);
       const gBg = el('g', {}, svg), gLines = el('g', { class: 'lines' }, svg), gNotes = el('g', {}, svg);
       const y0 = L.top;
-      const rowEnd = L.left + total * scale;
-      // string lines + labels
+      const rowEnd = left + total * scale;
+      // string lines (+ tuning / drum labels on the first row)
       this.lines.forEach((name, li) => {
         const y = y0 + li * L.gap;
-        el('line', { x1: L.left, x2: rowEnd, y1: y, y2: y, class: 'string' }, gLines);
-        const t = el('text', { x: L.left - 8, y: y + 3.5, class: 'tuning', 'text-anchor': 'end' }, gLines);
-        t.textContent = isDrums ? DRUMS[name].label : name;
+        el('line', { x1: left, x2: rowEnd, y1: y, y2: y, class: 'string' }, gLines);
+        if (ri === 0) {
+          const t = el('text', { x: left - 8, y: y + 3.5, class: 'tuning', 'text-anchor': 'end' }, gLines);
+          t.textContent = isDrums ? DRUMS[name].label : name;
+        }
       });
-      let x = L.left;
+      let x = left;
       for (const b of rowBars) {
         const bx = x, bw = b.w * scale;
         const layout = { row: ri, x: bx, w: bw, beats: [], beatEls: [], i: b.i };

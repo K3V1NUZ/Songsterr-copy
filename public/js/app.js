@@ -1,8 +1,8 @@
-import { parseTabDown, setHeaderLine, formatSync } from './tabdown.js';
 import { playedAt } from './timeline.js';
 import { TabView } from './renderer.js';
 import { Engine } from './engine.js';
-import { asciiToTabDown } from './ascii.js';
+import { asciiToModel } from './ascii.js';
+import { loadScore, modelToMusicXML, isScoreFile, isTextScore } from './importers/index.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -18,7 +18,7 @@ const ICONS = {
 const iconFor = (inst) => ICONS[inst === 'bass' ? 'bass' : inst === 'drums' ? 'drums' : inst === 'keys' ? 'keys' : 'guitar'];
 
 const state = {
-  songs: [], current: null, // {id, text, audio, file, local?}
+  songs: [], current: null, // {id, file, bytes, editable, audio, settings, local?}
   song: null, trackIndex: 0, serverless: false, issues: { errors: [], warnings: [] },
   tap: null,
 };
@@ -82,15 +82,18 @@ $('#searchInput').addEventListener('keydown', (e) => {
   } else if (e.key === 'Enter' && items[i]) { closeModals(); loadSong(items[i].dataset.id); }
 });
 
-// open local files without the server (.tabd + audio picked together)
+// open local files without the server (score + audio picked together)
 $('#localFiles').addEventListener('change', async (e) => {
   const files = [...e.target.files];
-  const tab = files.find((f) => /\.(tabd|txt)$/i.test(f.name));
+  const score = files.find((f) => isScoreFile(f.name));
   const audio = files.find((f) => f.type.startsWith('audio/'));
-  if (!tab) return toast('Pick a .tabd file (and optionally its audio file at the same time)');
-  const text = await tab.text();
-  const id = 'local:' + tab.name;
-  const entry = { id, local: true, text, audio: audio ? URL.createObjectURL(audio) : null, title: tab.name, artist: '', tracks: [] };
+  const settingsFile = files.find((f) => f.name === 'fretline.json');
+  if (!score) return toast('Pick a MusicXML or Guitar Pro file (optionally with its audio and fretline.json)');
+  const id = 'local:' + score.name;
+  let settings = {};
+  try { if (settingsFile) settings = JSON.parse(await settingsFile.text()); } catch { /* ignore */ }
+  const entry = { id, local: true, file: score.name, bytes: new Uint8Array(await score.arrayBuffer()), editable: isTextScore(score.name),
+    audio: audio ? URL.createObjectURL(audio) : null, settings, title: score.name, artist: '', tracks: [] };
   state.songs = state.songs.filter((s) => s.id !== id).concat(entry);
   closeModals();
   loadSong(id);
@@ -99,31 +102,38 @@ $('#localFiles').addEventListener('change', async (e) => {
 async function loadSong(id) {
   let info = state.songs.find((s) => s.id === id && s.local);
   if (!info) {
-    try { info = await api(`/api/songs/${encodeURIComponent(id)}`); }
-    catch (e) { return toast('Could not load song: ' + e.message); }
+    try {
+      info = await api(`/api/songs/${encodeURIComponent(id)}`);
+      info.bytes = new Uint8Array(await (await fetch(info.fileUrl, { cache: 'no-store' })).arrayBuffer());
+    } catch (e) { return toast('Could not load song: ' + e.message); }
   }
   state.current = info;
   try { localStorage.setItem('fretline:last', id); } catch { /* storage unavailable */ }
-  applyText(info.text, { audio: info.audio, keepTrack: false });
+  await applyScore(info.file, info.bytes, { audio: info.audio, keepTrack: false });
 }
 
-// parse + render; audio === undefined keeps the currently loaded audio
-function applyText(text, { audio, keepTrack = true } = {}) {
-  const { song, errors, warnings } = parseTabDown(text);
-  state.issues = { errors, warnings };
+// parse + render a score; audio === undefined keeps the currently loaded audio
+async function applyScore(name, bytes, { audio, keepTrack = true } = {}) {
+  const r = await loadScore(name, bytes);
+  state.issues = { errors: r.errors, warnings: r.warnings };
+  if (!r.song) { toast('Could not read the score: ' + (r.errors[0]?.msg || 'unknown error'), 6000); return false; }
+  const song = r.song;
+  const s = state.current.settings || {};
+  song.meta.offset = +s.offset || 0;
+  song.meta.sync = Array.isArray(s.sync) ? s.sync.map((a) => ({ bar: +a.bar, time: +a.time })) : [];
+  if (s.key) song.meta.key = s.key;
   state.song = song;
-  state.current.text = text;
-  const pos = engine.scoreTime ? engine._pos : 0;
-  const audioUrl = audio === undefined ? (engine.hasAudio ? engine.audio.src : null) : audio;
+  state.model = r.model;
+  state.format = r.format;
+  const pos = engine._pos || 0;
   if (audio === undefined && engine.hasAudio) {
-    // keep audio element, swap song data
     engine.pause();
     const src = engine.audio.src;
     engine.load(song, null); engine.hasAudio = true; engine.audio.src = src;
   } else {
-    engine.load(song, audioUrl);
+    engine.load(song, audio);
     // fresh load: play the recording if there is one, otherwise the tab synth
-    engine.opts.synth = !audioUrl; $('#optSynth').checked = engine.opts.synth;
+    engine.opts.synth = !audio; $('#optSynth').checked = engine.opts.synth;
     engine.opts.useAudio = true; $('#optAudio').checked = true;
   }
   if (!keepTrack || state.trackIndex >= song.tracks.length) state.trackIndex = 0;
@@ -135,19 +145,21 @@ function applyText(text, { audio, keepTrack = true } = {}) {
   renderTrack();
   updateSoundUI();
   updateSyncUI();
-  if (errors.length) toast(`${errors.length} error(s) in this file — click the warning under the title`);
+  if (r.errors.length) toast(`${r.errors.length} problem(s) in this file — click the warning under the title`);
+  return true;
 }
 
 function renderHead() {
   const m = state.song.meta, { errors, warnings } = state.issues;
   const n = errors.length + warnings.length;
-  const audioNote = state.current.audio ? '<span class="chip ok">♪ recording attached</span>' :
-    m.audio ? `<span class="chip">♪ “${esc(m.audio)}” not found — synth</span>` : '<span class="chip">synth only · attach audio in Sync</span>';
+  const c = state.current;
+  const audioNote = c.audio ? '<span class="chip ok">♪ recording attached</span>' :
+    c.audioMissing ? `<span class="chip">♪ “${esc(c.audioMissing)}” not found — synth</span>` : '<span class="chip">synth only · attach audio in Sync</span>';
   const tracks = state.song.tracks.length;
   $('#songHead').innerHTML = `<h1>${esc(m.title)}</h1><span class="artist">${esc(m.artist)}</span>
     ${n ? `<span class="warn" id="issuesLink">${errors.length ? errors.length + ' errors' : ''} ${warnings.length ? warnings.length + ' warnings' : ''}</span>` : ''}
     <span class="meta"><span class="chip">${m.tempo} BPM</span><span class="chip">${m.time[0]}/${m.time[1]}</span>${m.key ? `<span class="chip">${esc(m.key)}</span>` : ''}
-    <span class="chip">${tracks} track${tracks === 1 ? '' : 's'}</span>${audioNote}</span>`;
+    <span class="chip">${tracks} track${tracks === 1 ? '' : 's'}</span><span class="chip">${esc(state.format || '')}</span>${audioNote}</span>`;
   $('#issuesLink')?.addEventListener('click', openEditor);
 }
 
@@ -224,7 +236,7 @@ function updateSoundUI() {
   $('#soundLabel').textContent = a && s ? 'Audio+Tab' : a ? 'Recording' : s ? 'Synth' : 'Muted';
   $('#soundHint').textContent = has
     ? 'Tip: turn on both to hear the tab synth on top of the recording — the easiest way to check the sync.'
-    : 'No recording attached to this song. Use Sync → “Attach audio file…”, or put audio.mp3 next to song.tabd.';
+    : 'No recording attached to this song. Use Sync → “Attach audio file…”, or put audio.mp3 into the song folder.';
 }
 
 // toggles
@@ -366,7 +378,7 @@ function updateSyncUI() {
   if (!state.song) return;
   const m = state.song.meta;
   const has = engine.hasAudio;
-  $('#syncNoAudio').innerHTML = has ? '' : `<p>No audio attached${m.audio ? ` (file “${esc(m.audio)}” is missing)` : ''}. Attach your MP3 below — it is copied into this song's folder so it works offline.</p>`;
+  $('#syncNoAudio').innerHTML = has ? '' : `<p>No audio attached${state.current.audioMissing ? ` (file “${esc(state.current.audioMissing)}” is missing)` : ''}. Attach your MP3 below — it is copied into this song's folder so it works offline.</p>`;
   $('#offsetVal').textContent = (m.sync.length ? (m.sync.find((a) => a.bar === 1)?.time ?? engine.sync.toAudio(0)) : m.offset).toFixed(3) + ' s';
   const anchors = m.sync.slice().sort((a, b) => a.bar - b.bar);
   $('#anchorList').innerHTML = anchors.length
@@ -451,11 +463,19 @@ $('#btnClearSync').addEventListener('click', () => { state.song.meta.sync = []; 
 $('#btnSyncSave').addEventListener('click', saveSync);
 async function saveSync() {
   const m = state.song.meta;
-  let text = state.current.text;
-  text = setHeaderLine(text, 'offset', (m.sync.find((a) => a.bar === 1)?.time ?? m.offset).toFixed(3));
-  text = setHeaderLine(text, 'sync', m.sync.length ? formatSync(m.sync) : null);
-  await saveText(text);
-  state.syncDirty = false;
+  const settings = { offset: +(m.sync.find((a) => a.bar === 1)?.time ?? m.offset).toFixed(3), sync: m.sync.slice().sort((a, b) => a.bar - b.bar) };
+  if (state.current.local || state.serverless) {
+    download(JSON.stringify({ ...state.current.settings, ...settings }, null, 2), 'fretline.json', 'application/json');
+    state.syncDirty = false;
+    return;
+  }
+  try {
+    const info = await api(`/api/songs/${encodeURIComponent(state.current.id)}/settings`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) });
+    state.current.settings = info.settings;
+    state.syncDirty = false;
+    toast(`Sync saved to ${info.id}/fretline.json`);
+  } catch (e) { toast('Save failed: ' + e.message); }
 }
 $('#attachAudio').addEventListener('change', async (e) => {
   const f = e.target.files[0];
@@ -468,34 +488,27 @@ $('#attachAudio').addEventListener('change', async (e) => {
   toast('Copying audio into the library…', 10000);
   try {
     const info = await api(`/api/songs/${encodeURIComponent(state.current.id)}/audio?name=${encodeURIComponent(f.name)}`, { method: 'PUT', body: f });
-    state.current = info;
-    applyText(info.text, { audio: info.audio + '?v=' + Date.now(), keepTrack: true });
+    Object.assign(state.current, { audio: info.audio, audioName: info.audioName, audioMissing: null, settings: info.settings });
+    await applyScore(state.current.file, state.current.bytes, { audio: info.audio + '?v=' + Date.now(), keepTrack: true });
     toast('Audio attached. Now set where bar 1 starts, then tap a few bars.');
   } catch (err) { toast('Upload failed: ' + err.message); }
 });
 
-async function saveText(text) {
-  if (state.current.local || state.serverless) { download(text); return; }
-  try {
-    const info = await api(`/api/songs/${encodeURIComponent(state.current.id)}`, { method: 'PUT', body: text });
-    state.current.text = info.text;
-    toast('Saved to ' + info.id + '/' + info.file);
-    refreshLibrary();
-  } catch (e) { toast('Save failed: ' + e.message); }
-}
-function download(text) {
+function download(text, name, type = 'application/vnd.recordare.musicxml+xml') {
   const a = document.createElement('a');
-  const name = (state.song?.meta.title || 'song').replace(/[^\w-]+/g, '_') + '.tabd';
-  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  a.href = URL.createObjectURL(new Blob([text], { type }));
   a.download = name; a.click();
   toast('Downloaded ' + name);
 }
+const songFileName = () => (state.song?.meta.title || 'song').replace(/[^\w-]+/g, '_') + '.musicxml';
 
-// ---------------------------------------------------------------- editor
+// ---------------------------------------------------------------- editor (MusicXML source)
+const enc = (text) => new TextEncoder().encode(text);
 function issuesHtml(errors, warnings) {
   if (!errors.length && !warnings.length) return '<div class="ok">✓ No problems found</div>';
-  return errors.map((e) => `<div class="e" data-line="${e.line}">✗ line ${e.line}: ${esc(e.msg)}</div>`).join('') +
-    warnings.map((w) => `<div class="w" data-line="${w.line}">! line ${w.line}: ${esc(w.msg)}</div>`).join('');
+  const where = (x) => (x.line ? `line ${x.line}: ` : '');
+  return errors.map((e) => `<div class="e" data-line="${e.line || 0}">✗ ${where(e)}${esc(e.msg)}</div>`).join('') +
+    warnings.map((w) => `<div class="w" data-line="${w.line || 0}">! ${where(w)}${esc(w.msg)}</div>`).join('');
 }
 function bindIssueJump(container, ta) {
   container.querySelectorAll('[data-line]').forEach((d) => d.addEventListener('click', () => {
@@ -507,34 +520,52 @@ function bindIssueJump(container, ta) {
   }));
 }
 function liveValidate(ta, out) {
-  const run = () => {
-    const { errors, warnings } = parseTabDown(ta.value);
-    out.innerHTML = issuesHtml(errors, warnings);
+  const run = async () => {
+    if (!ta.value.trim()) { out.innerHTML = ''; return; }
+    const r = await loadScore('check.musicxml', enc(ta.value));
+    out.innerHTML = issuesHtml(r.errors, r.warnings);
     bindIssueJump(out, ta);
   };
-  ta.addEventListener('input', () => { clearTimeout(ta._t); ta._t = setTimeout(run, 250); });
+  ta.addEventListener('input', () => { clearTimeout(ta._t); ta._t = setTimeout(run, 300); });
   return run;
 }
 const validateEdit = liveValidate($('#editText'), $('#editIssues'));
 function openEditor() {
   if (!state.song) return toast('Open a song first');
-  $('#editText').value = state.current.text;
+  const c = state.current;
+  if (c.editable) {
+    $('#editText').value = new TextDecoder().decode(c.bytes);
+    $('#editNote').textContent = `Editing ${c.file}. The previous version is kept as ${c.file}.bak when you save.`;
+  } else {
+    $('#editText').value = modelToMusicXML(state.model);
+    $('#editNote').textContent = `This song is stored as ${state.format} (${c.file}). It is shown converted to MusicXML; saving stores it as song.musicxml and keeps the original as ${c.file}.bak.`;
+  }
   openModal('#editModal');
   validateEdit();
 }
 $('#btnEdit').addEventListener('click', openEditor);
-$('#btnEditApply').addEventListener('click', () => { applyText($('#editText').value, {}); toast('Preview updated (not saved yet)'); });
-$('#btnEditDownload').addEventListener('click', () => download($('#editText').value));
+$('#btnEditApply').addEventListener('click', async () => {
+  if (await applyScore('preview.musicxml', enc($('#editText').value), {})) toast('Preview updated (not saved yet)');
+});
+$('#btnEditDownload').addEventListener('click', () => download($('#editText').value, songFileName()));
 $('#btnEditSave').addEventListener('click', async () => {
   const text = $('#editText').value;
-  applyText(text, {});
-  await saveText(text);
-  closeModals();
+  const name = state.current.editable ? state.current.file : 'song.musicxml';
+  if (!(await applyScore(name, enc(text), {}))) return;
+  if (state.current.local || state.serverless) { download(text, songFileName()); return; }
+  try {
+    const info = await api(`/api/songs/${encodeURIComponent(state.current.id)}/score?name=${encodeURIComponent(name)}`, { method: 'PUT', body: text });
+    Object.assign(state.current, { file: info.file, fileUrl: info.fileUrl, editable: info.editable, bytes: enc(text) });
+    toast('Saved ' + info.id + '/' + info.file);
+    refreshLibrary();
+    closeModals();
+  } catch (e) { toast('Save failed: ' + e.message); }
 });
 
 // ---------------------------------------------------------------- import
 const validateImport = liveValidate($('#importText'), $('#importIssues'));
-function openImport() { openModal('#importModal'); validateImport(); loadAiPrompt(); }
+let pickedScore = null; // {name, bytes}
+function openImport() { openModal('#importModal'); loadAiPrompt(); }
 $('#btnImport').addEventListener('click', openImport);
 $('#btnImport2').addEventListener('click', openImport);
 $('#btnHelp').addEventListener('click', () => openModal('#helpModal'));
@@ -542,68 +573,44 @@ $$('#importModal .tab').forEach((t) => t.addEventListener('click', () => showPan
 function showPane(id) {
   $$('#importModal .tab').forEach((x) => x.classList.toggle('on', x.dataset.pane === id));
   $$('#importModal .pane').forEach((p) => p.classList.toggle('on', p.id === id));
-  $('#btnDoImport').closest('.sheet-foot').style.display = id === 'paneTabd' ? '' : 'none';
+  $('#importFoot').style.display = id === 'paneFile' || id === 'panePaste' ? '' : 'none';
+  state.importPane = id;
+  if (id === 'panePaste') validateImport();
 }
-$('#tabdFile').addEventListener('change', async (e) => {
-  const f = e.target.files[0]; if (!f) return;
-  $('#importText').value = await f.text(); validateImport();
-});
-$('#btnAsciiConvert').addEventListener('click', () => {
-  const time = ($('#asciiTime').value || '4/4').split('/').map(Number);
-  const res = asciiToTabDown($('#asciiText').value, {
-    title: $('#asciiTitle').value || 'Imported tab', artist: $('#asciiArtist').value, tempo: +$('#asciiTempo').value || 100, time,
-  });
-  if (res.error) return toast(res.error);
-  $('#importText').value = res.text;
-  showPane('paneTabd'); validateImport();
-  toast(`Converted ${res.bars} bars — check the rhythm, then Import`);
-});
-// ---- Guitar Pro / MusicXML import
-let scoreModel = null;
-const SCORE_RE = /\.(gp|gp3|gp4|gp5|gpx|musicxml|xml|mxl)$/i;
 async function loadScoreFile(file) {
   const box = $('#scoreInfo');
   box.innerHTML = `<div class="hint">Reading ${esc(file.name)}…</div>`;
-  try {
-    const { importScoreFile } = await import('./importers/index.js');
-    scoreModel = await importScoreFile(file.name, new Uint8Array(await file.arrayBuffer()));
-  } catch (e) {
-    scoreModel = null;
-    box.innerHTML = `<div class="issues"><div class="e">✗ ${esc(e.message)}</div></div>`;
-    return;
-  }
-  const m = scoreModel;
-  const rows = m.tracks.map((t, i) => {
-    const on = t.noteCount > 0 && t.instrument !== 'keys';
-    const desc = t.drums ? 'drum kit' : t.tuning.length ? `${t.tuning.length} strings${t.capo ? ', capo ' + t.capo : ''}` : 'no tab data';
-    return `<label class="track-pick"><input type="checkbox" data-ti="${i}" ${on ? 'checked' : ''}>
-      <span class="inst-icon">${iconFor(t.instrument)}</span>
-      <span class="nm">${esc(t.name)}<small>${esc(t.instrument)} · ${desc} · ${t.noteCount} notes</small></span></label>`;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const r = await loadScore(file.name, bytes);
+  if (!r.song) { pickedScore = null; box.innerHTML = `<div class="issues">${issuesHtml(r.errors, [])}</div>`; return; }
+  pickedScore = { name: file.name, bytes };
+  const m = r.model;
+  const rows = r.song.tracks.map((t, i) => {
+    const desc = t.instrument === 'drums' ? 'drum kit' : `${t.tuning.length} strings${t.capo ? ', capo ' + t.capo : ''}`;
+    return `<div class="track-pick"><span class="inst-icon">${iconFor(t.instrument)}</span>
+      <span class="nm">${esc(t.name)}<small>${esc(t.instrument)} · ${desc} · ${m.tracks[i]?.noteCount ?? 0} notes</small></span></div>`;
   }).join('');
-  box.innerHTML = `<div class="score-head"><b>${esc(m.meta.title || file.name)}</b>${m.meta.artist ? ' — ' + esc(m.meta.artist) : ''}
-      <span class="badge">${esc(m.format)}</span><span class="badge">${m.masterBars.length} bars</span><span class="badge">${Math.round(m.meta.tempo)} BPM</span></div>
-    <div class="hint">Choose the instruments to include:</div>
+  box.innerHTML = `<div class="score-head"><b>${esc(r.song.meta.title)}</b>${r.song.meta.artist ? ' — ' + esc(r.song.meta.artist) : ''}
+      <span class="badge">${esc(r.format)}</span><span class="badge">${r.song.masterBars.length} bars</span><span class="badge">${Math.round(r.song.meta.tempo)} BPM</span></div>
     <div class="track-picks">${rows}</div>
-    <div class="row"><button class="primary" id="btnScoreConvert">Convert → TabDown</button></div>`;
-  $('#btnScoreConvert').addEventListener('click', convertScore);
-}
-async function convertScore() {
-  if (!scoreModel) return;
-  const sel = $$('#scoreInfo [data-ti]').filter((c) => c.checked).map((c) => +c.dataset.ti);
-  if (!sel.length) return toast('Pick at least one track');
-  const { modelToTabDown } = await import('./importers/index.js');
-  const { text, warnings } = modelToTabDown(scoreModel, { trackIndexes: sel, source: scoreModel.fileName });
-  $('#importText').value = text;
-  showPane('paneTabd');
-  validateImport();
-  if (warnings.length) $('#importIssues').insertAdjacentHTML('afterbegin', warnings.map((w) => `<div class="w">! ${esc(w)}</div>`).join(''));
-  toast(`Converted ${sel.length} track${sel.length > 1 ? 's' : ''} — review it, then press Import`, 3500);
+    <div class="issues">${r.errors.length || r.warnings.length ? issuesHtml(r.errors, r.warnings) : ''}</div>`;
 }
 $('#scoreFile').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) loadScoreFile(f); e.target.value = ''; });
 const drop = $('#scoreDrop');
 ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.add('over'); }));
 ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove('over')));
 drop.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); const f = e.dataTransfer.files[0]; if (f) loadScoreFile(f); });
+
+$('#btnAsciiConvert').addEventListener('click', () => {
+  const time = ($('#asciiTime').value || '4/4').split('/').map(Number);
+  const model = asciiToModel($('#asciiText').value, {
+    title: $('#asciiTitle').value || 'Imported tab', artist: $('#asciiArtist').value, tempo: +$('#asciiTempo').value || 100, time,
+  });
+  if (model.error) return toast(model.error);
+  $('#importText').value = modelToMusicXML(model);
+  showPane('panePaste');
+  toast(`Converted ${model.bars} bars to MusicXML — the rhythm is guessed, check it by ear`, 4000);
+});
 
 let aiPromptLoaded = false;
 async function loadAiPrompt() {
@@ -618,37 +625,43 @@ $('#btnCopyPrompt').addEventListener('click', async () => {
   catch { $('#aiPrompt').select(); toast('Press Ctrl+C to copy'); }
 });
 $('#btnDoImport').addEventListener('click', async () => {
-  const text = $('#importText').value;
-  const { song, errors } = parseTabDown(text);
-  if (!song.tracks.length) return toast('Nothing to import');
-  if (errors.length && !confirm(`${errors.length} error(s) — import anyway?`)) return;
+  let name, bytes;
+  if (state.importPane === 'panePaste') {
+    if (!$('#importText').value.trim()) return toast('Paste MusicXML first');
+    name = 'song.musicxml'; bytes = enc($('#importText').value);
+  } else {
+    if (!pickedScore) return toast('Choose a score file first');
+    ({ name, bytes } = pickedScore);
+  }
+  const r = await loadScore(name, bytes);
+  if (!r.song) return toast('Cannot import: ' + (r.errors[0]?.msg || 'unreadable file'), 5000);
+  if (r.errors.length && !confirm(`${r.errors.length} problem(s) in the file — import anyway?`)) return;
   const audio = $('#importAudio').files[0];
   if (state.serverless) {
-    const id = 'local:' + song.meta.title;
-    state.songs.push({ id, local: true, text, audio: audio ? URL.createObjectURL(audio) : null, title: song.meta.title, artist: song.meta.artist, tracks: [] });
+    const id = 'local:' + r.song.meta.title;
+    state.songs.push({ id, local: true, file: name, bytes, editable: isTextScore(name), settings: {}, audio: audio ? URL.createObjectURL(audio) : null,
+      title: r.song.meta.title, artist: r.song.meta.artist, tracks: [] });
     closeModals(); return loadSong(id);
   }
   try {
-    let info = await api('/api/songs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    let info = await api(`/api/songs?name=${encodeURIComponent(name)}`, { method: 'POST', body: bytes });
     if (audio) info = await api(`/api/songs/${encodeURIComponent(info.id)}/audio?name=${encodeURIComponent(audio.name)}`, { method: 'PUT', body: audio });
     closeModals();
-    $('#importText').value = ''; $('#importAudio').value = '';
+    $('#importText').value = ''; $('#importAudio').value = ''; $('#scoreInfo').innerHTML = ''; pickedScore = null;
     await refreshLibrary();
     loadSong(info.id);
     toast(`Imported into library/${info.id}/`);
   } catch (e) { toast('Import failed: ' + e.message); }
 });
 
-// drag & drop a .tabd and/or audio file anywhere
+// drag & drop a score and/or audio file anywhere
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', async (e) => {
   e.preventDefault();
   const files = [...e.dataTransfer.files];
-  const tab = files.find((f) => /\.(tabd|txt)$/i.test(f.name));
-  const score = files.find((f) => SCORE_RE.test(f.name));
+  const score = files.find((f) => isScoreFile(f.name));
   const audio = files.find((f) => f.type.startsWith('audio/'));
-  if (score) { openImport(); showPane('paneScore'); loadScoreFile(score); }
-  else if (tab) { $('#importText').value = await tab.text(); openImport(); showPane('paneTabd'); validateImport(); }
+  if (score) { openImport(); showPane('paneFile'); loadScoreFile(score); }
   else if (audio && state.song) {
     const dt = new DataTransfer(); dt.items.add(audio);
     $('#attachAudio').files = dt.files; $('#attachAudio').dispatchEvent(new Event('change'));
@@ -659,7 +672,7 @@ window.addEventListener('beforeunload', (e) => { if (state.syncDirty) { e.preven
 
 // ---------------------------------------------------------------- boot
 loadPrefs();
-showPane('paneTabd');
+showPane('paneFile');
 (async () => {
   await refreshLibrary();
   let last = null;

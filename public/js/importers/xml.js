@@ -23,8 +23,10 @@ export function parseXML(src) {
   if (src.charCodeAt(0) === 0xfeff) src = src.slice(1);
   const root = new Node('#document', {});
   const stack = [root];
-  let i = 0;
+  const errors = [];
+  let i = 0, lineNo = 1, scanned = 0;
   const n = src.length;
+  const lineAt = (idx) => { for (; scanned < idx; scanned++) if (src.charCodeAt(scanned) === 10) lineNo++; return lineNo; };
   while (i < n) {
     const lt = src.indexOf('<', i);
     if (lt < 0) break;
@@ -47,8 +49,14 @@ export function parseXML(src) {
     if (src[lt + 1] === '/') {
       const e = src.indexOf('>', lt);
       const name = src.slice(lt + 2, e).trim().replace(/^.*:/, '');
-      // pop to matching element (tolerant of mismatches)
-      for (let k = stack.length - 1; k > 0; k--) if (stack[k].name === name) { stack.length = k; break; }
+      // pop to matching element (tolerant of mismatches, but report them)
+      let k = stack.length - 1;
+      while (k > 0 && stack[k].name !== name) k--;
+      if (k === 0) errors.push({ line: lineAt(lt), msg: `Closing tag </${name}> has no matching <${name}>` });
+      else {
+        for (let j = stack.length - 1; j > k; j--) errors.push({ line: stack[j].line, msg: `<${stack[j].name}> is never closed (closed by </${name}> on line ${lineAt(lt)})` });
+        stack.length = k;
+      }
       i = e + 1; continue;
     }
     // start tag: scan to '>' outside quotes
@@ -65,11 +73,15 @@ export function parseXML(src) {
     const rest = body.slice(m ? m[0].length : 0);
     while ((a = re.exec(rest))) attrs[a[1].replace(/^.*:/, '')] = decodeEntities(a[3] ?? a[4]);
     const node = new Node(name, attrs);
+    node.line = lineAt(lt);
     stack[stack.length - 1].children.push(node);
     if (!selfClose) stack.push(node);
     i = j + 1;
   }
-  return root.children.find((c) => c instanceof Node) || root;
+  for (let j = stack.length - 1; j > 0; j--) errors.push({ line: stack[j].line, msg: `<${stack[j].name}> is never closed` });
+  const top = root.children.find((c) => c instanceof Node) || root;
+  top.errors = errors;
+  return top;
 }
 
 export function decodeText(bytes) {
