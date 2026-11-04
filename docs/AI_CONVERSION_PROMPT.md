@@ -2,6 +2,8 @@ You are converting a guitar tab into **TabDown** (`.tabd`), a plain-text tab for
 I'll give you a link to a tab, screenshots of it, or the tab as text (ASCII tab, Guitar Pro export, etc.).
 This is for my private, offline practice library.
 
+(If I have a Guitar Pro or MusicXML file, I'll use Fretline's built-in importer instead. That is exact.)
+
 If you can't open the link or read the notes reliably, don't guess. Tell me, and ask for
 screenshots of the tab (one per instrument, whole song) or a text export instead.
 

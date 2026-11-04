@@ -141,11 +141,13 @@ function applyText(text, { audio, keepTrack = true } = {}) {
 function renderHead() {
   const m = state.song.meta, { errors, warnings } = state.issues;
   const n = errors.length + warnings.length;
-  const audioNote = state.current.audio ? '♪ recording attached' :
-    m.audio ? `♪ “${esc(m.audio)}” not found — playing synth` : 'synth only — attach audio in Sync';
+  const audioNote = state.current.audio ? '<span class="chip ok">♪ recording attached</span>' :
+    m.audio ? `<span class="chip">♪ “${esc(m.audio)}” not found — synth</span>` : '<span class="chip">synth only · attach audio in Sync</span>';
+  const tracks = state.song.tracks.length;
   $('#songHead').innerHTML = `<h1>${esc(m.title)}</h1><span class="artist">${esc(m.artist)}</span>
-    <span class="meta">${m.tempo} BPM · ${m.time[0]}/${m.time[1]}${m.key ? ' · ' + esc(m.key) : ''} · ${state.song.tracks.length} tracks · ${audioNote}</span>
-    ${n ? `<span class="warn" id="issuesLink">${errors.length ? errors.length + ' errors' : ''} ${warnings.length ? warnings.length + ' warnings' : ''}</span>` : ''}`;
+    ${n ? `<span class="warn" id="issuesLink">${errors.length ? errors.length + ' errors' : ''} ${warnings.length ? warnings.length + ' warnings' : ''}</span>` : ''}
+    <span class="meta"><span class="chip">${m.tempo} BPM</span><span class="chip">${m.time[0]}/${m.time[1]}</span>${m.key ? `<span class="chip">${esc(m.key)}</span>` : ''}
+    <span class="chip">${tracks} track${tracks === 1 ? '' : 's'}</span>${audioNote}</span>`;
   $('#issuesLink')?.addEventListener('click', openEditor);
 }
 
@@ -262,7 +264,7 @@ engine.on('state', () => {
 engine.on('countin', (i, n) => {
   const c = $('#countin');
   if (!i) { c.classList.remove('on'); return; }
-  c.textContent = i; c.classList.remove('on'); void c.offsetWidth; c.classList.add('on');
+  c.dataset.n = i; c.classList.remove('on'); void c.offsetWidth; c.classList.add('on');
   clearTimeout(c._t); c._t = setTimeout(() => c.classList.remove('on'), i === n ? 350 : 900);
 });
 engine.on('seek', () => updateCursor(true));
@@ -540,7 +542,7 @@ $$('#importModal .tab').forEach((t) => t.addEventListener('click', () => showPan
 function showPane(id) {
   $$('#importModal .tab').forEach((x) => x.classList.toggle('on', x.dataset.pane === id));
   $$('#importModal .pane').forEach((p) => p.classList.toggle('on', p.id === id));
-  $('#btnDoImport').style.display = id === 'paneTabd' ? '' : 'none';
+  $('#btnDoImport').closest('.sheet-foot').style.display = id === 'paneTabd' ? '' : 'none';
 }
 $('#tabdFile').addEventListener('change', async (e) => {
   const f = e.target.files[0]; if (!f) return;
@@ -556,6 +558,53 @@ $('#btnAsciiConvert').addEventListener('click', () => {
   showPane('paneTabd'); validateImport();
   toast(`Converted ${res.bars} bars — check the rhythm, then Import`);
 });
+// ---- Guitar Pro / MusicXML import
+let scoreModel = null;
+const SCORE_RE = /\.(gp|gp3|gp4|gp5|gpx|musicxml|xml|mxl)$/i;
+async function loadScoreFile(file) {
+  const box = $('#scoreInfo');
+  box.innerHTML = `<div class="hint">Reading ${esc(file.name)}…</div>`;
+  try {
+    const { importScoreFile } = await import('./importers/index.js');
+    scoreModel = await importScoreFile(file.name, new Uint8Array(await file.arrayBuffer()));
+  } catch (e) {
+    scoreModel = null;
+    box.innerHTML = `<div class="issues"><div class="e">✗ ${esc(e.message)}</div></div>`;
+    return;
+  }
+  const m = scoreModel;
+  const rows = m.tracks.map((t, i) => {
+    const on = t.noteCount > 0 && t.instrument !== 'keys';
+    const desc = t.drums ? 'drum kit' : t.tuning.length ? `${t.tuning.length} strings${t.capo ? ', capo ' + t.capo : ''}` : 'no tab data';
+    return `<label class="track-pick"><input type="checkbox" data-ti="${i}" ${on ? 'checked' : ''}>
+      <span class="inst-icon">${iconFor(t.instrument)}</span>
+      <span class="nm">${esc(t.name)}<small>${esc(t.instrument)} · ${desc} · ${t.noteCount} notes</small></span></label>`;
+  }).join('');
+  box.innerHTML = `<div class="score-head"><b>${esc(m.meta.title || file.name)}</b>${m.meta.artist ? ' — ' + esc(m.meta.artist) : ''}
+      <span class="badge">${esc(m.format)}</span><span class="badge">${m.masterBars.length} bars</span><span class="badge">${Math.round(m.meta.tempo)} BPM</span></div>
+    <div class="hint">Choose the instruments to include:</div>
+    <div class="track-picks">${rows}</div>
+    <div class="row"><button class="primary" id="btnScoreConvert">Convert → TabDown</button></div>`;
+  $('#btnScoreConvert').addEventListener('click', convertScore);
+}
+async function convertScore() {
+  if (!scoreModel) return;
+  const sel = $$('#scoreInfo [data-ti]').filter((c) => c.checked).map((c) => +c.dataset.ti);
+  if (!sel.length) return toast('Pick at least one track');
+  const { modelToTabDown } = await import('./importers/index.js');
+  const { text, warnings } = modelToTabDown(scoreModel, { trackIndexes: sel, source: scoreModel.fileName });
+  $('#importText').value = text;
+  showPane('paneTabd');
+  validateImport();
+  if (warnings.length) $('#importIssues').insertAdjacentHTML('afterbegin', warnings.map((w) => `<div class="w">! ${esc(w)}</div>`).join(''));
+  toast(`Converted ${sel.length} track${sel.length > 1 ? 's' : ''} — review it, then press Import`, 3500);
+}
+$('#scoreFile').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) loadScoreFile(f); e.target.value = ''; });
+const drop = $('#scoreDrop');
+['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove('over')));
+drop.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); const f = e.dataTransfer.files[0]; if (f) loadScoreFile(f); });
+
 let aiPromptLoaded = false;
 async function loadAiPrompt() {
   if (aiPromptLoaded) return;
@@ -596,8 +645,10 @@ document.addEventListener('drop', async (e) => {
   e.preventDefault();
   const files = [...e.dataTransfer.files];
   const tab = files.find((f) => /\.(tabd|txt)$/i.test(f.name));
+  const score = files.find((f) => SCORE_RE.test(f.name));
   const audio = files.find((f) => f.type.startsWith('audio/'));
-  if (tab) { $('#importText').value = await tab.text(); openImport(); showPane('paneTabd'); validateImport(); }
+  if (score) { openImport(); showPane('paneScore'); loadScoreFile(score); }
+  else if (tab) { $('#importText').value = await tab.text(); openImport(); showPane('paneTabd'); validateImport(); }
   else if (audio && state.song) {
     const dt = new DataTransfer(); dt.items.add(audio);
     $('#attachAudio').files = dt.files; $('#attachAudio').dispatchEvent(new Event('change'));

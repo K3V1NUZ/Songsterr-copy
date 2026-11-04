@@ -11,7 +11,7 @@ It uses a simple classic layout: a search bar at the top, the tab in the middle,
 * **Count-in**, metronome, speed 25–150% (the recording keeps its pitch), drag across bars to **loop**
 * **Multiple guitars per song**: an instrument switcher with solo and mute
 * Sync tools that **match the tab to the recording**: set the offset, tap along, use sync points
-* Import TabDown, convert ASCII tabs, or let an AI convert a tab for you
+* Import **Guitar Pro** (GP3, GP4, GP5, GPX, GP7/8) and **MusicXML** files with exact rhythms and techniques. You can also convert ASCII tabs or let an AI convert a tab for you
 * No accounts, no scraping, no internet needed
 
 ## Run it
@@ -35,7 +35,12 @@ npm run demo-audio
 
 The workflow:
 
-1. **Get the tab into TabDown.** You have three options:
+1. **Get the tab into TabDown.** You have four options:
+   * **Guitar Pro or MusicXML file (best).** Go to **Import → Guitar Pro / MusicXML**, or drop the file onto the window.
+     Pick which instruments to keep and click **Convert**. Rhythms, ties, tunings, capo, repeats, alternate endings,
+     tempo changes, sections, drums and techniques (hammer-ons, pull-offs, slides, bends, vibrato, palm mutes,
+     harmonics, dead and ghost notes) all carry over. Sheet music without tab data gets playable string/fret positions automatically.
+     The command-line version is `node tools/import.js song.gp5 --tracks 1,2 -o library/my-song/song.tabd`.
    * **AI.** In the app, go to **Import → Convert with AI**, copy the prompt, and give it to an AI together
      with the link to the tab you want. If the AI can't open the page, give it screenshots
      ([prompt file](docs/AI_CONVERSION_PROMPT.md)). The AI answers with a `.tabd` file.
@@ -74,12 +79,15 @@ public/js/engine.js     playback: audio clock, synth, metronome, count-in, loop
 public/js/renderer.js   SVG tab rendering, cursor, click-to-seek, drag-to-loop
 public/js/ks.js         plucked-string / drum synthesis
 public/js/ascii.js      ASCII-tab → TabDown converter
-tools/                  validate.js, ascii2tabd.js, render-wav.js, selftest.js
+public/js/importers/    Guitar Pro 3–8 + MusicXML importers (zip/xml readers, TabDown writer)
+tools/                  validate.js, import.js, ascii2tabd.js, render-wav.js, selftest.js
+tests/fixtures/         importer test files (made from the example songs)
 docs/                   format spec + AI conversion prompt
 library/                your songs (one folder each)
 ```
 
-Run the tests with `npm test`.
+Run the tests with `npm test`. The importer tests convert `tests/fixtures/` back to TabDown and check that every note
+matches the original example song. The GP3–5 fixtures were written by PyGuitarPro, and the MusicXML ones by music21.
 
 Without the server, you can still open `public/index.html` and use **Search → Open local files…**
 to pick a `.tabd` file and an audio file. In that mode, saving downloads the file instead of writing it to the library.

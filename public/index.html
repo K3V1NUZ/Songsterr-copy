@@ -9,7 +9,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="logo"></span>Fretline</div>
+    <div class="brand"><span class="logo"></span><span class="word">Fretline</span></div>
     <button class="searchbox" id="openSearch" title="Search your library (/)">
       <svg viewBox="0 0 24 24" width="17" height="17"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       <span id="songLabel">Search your tabs…</span>
@@ -92,6 +92,7 @@
       <div class="sheet-head"><h3>Import a song</h3><button class="x" data-close>×</button></div>
       <div class="tabs">
         <button class="tab on" data-pane="paneTabd">TabDown (.tabd)</button>
+        <button class="tab" data-pane="paneScore">Guitar Pro / MusicXML</button>
         <button class="tab" data-pane="paneAscii">Convert ASCII tab</button>
         <button class="tab" data-pane="paneAI">Convert with AI</button>
       </div>
@@ -101,6 +102,16 @@
         <textarea id="importText" spellcheck="false" placeholder="title: My Song&#10;artist: Someone&#10;tempo: 120&#10;time: 4/4&#10;&#10;track: Guitar&#10;tuning: standard&#10;q 6:0 6:3 6:5 r | ..."></textarea>
         <div class="issues" id="importIssues"></div>
         <div class="row"><span>Audio file (optional):</span> <input type="file" id="importAudio" accept="audio/*"></div>
+      </div>
+      <div class="pane" id="paneScore">
+        <label class="dropzone" id="scoreDrop">
+          <input type="file" id="scoreFile" accept=".gp,.gp3,.gp4,.gp5,.gpx,.musicxml,.xml,.mxl">
+          <svg viewBox="0 0 24 24" width="34" height="34"><path d="M12 15V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <b>Drop a Guitar Pro or MusicXML file here</b>
+          <span>or click to choose · .gp3 .gp4 .gp5 .gpx .gp · .musicxml .xml .mxl</span>
+        </label>
+        <div id="scoreInfo" class="score-info"></div>
+        <p class="hint">Exact rhythms and techniques are kept. Files without tab data (plain sheet music) get string/fret positions worked out automatically.</p>
       </div>
       <div class="pane" id="paneAscii">
         <p class="hint">Paste a classic ASCII tab (<code>e|---0---3---|</code>). Notes are exact, the <b>rhythm is estimated</b> from spacing — fix it in the editor afterwards.</p>
