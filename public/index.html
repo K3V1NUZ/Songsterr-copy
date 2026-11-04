@@ -35,24 +35,29 @@
 
   <!-- bottom control bar -->
   <footer class="controls" id="controls">
-    <div class="group">
-      <button class="ctl" id="btnStop" title="Back to start (Home)"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM9.5 12L19 5v14z"/></svg></button>
-      <button class="ctl play" id="btnPlay" title="Play / pause (Space)"><svg viewBox="0 0 24 24" id="playIcon"><path d="M7 4.5v15l13-7.5z"/></svg></button>
-      <div class="pos" id="pos">Bar –</div>
+    <div class="progress" id="progress" title="Click to jump"><div class="progress-loop" id="progressLoop"></div><div class="progress-fill" id="progressFill"></div></div>
+    <div class="bar-left">
+      <button class="tbtn icon" id="btnStop" title="Back to start (Home)"><svg viewBox="0 0 20 20"><path d="M5 4h2v12H5zM8.5 10 16 4.5v11z"/></svg></button>
+      <button class="play" id="btnPlay" title="Play / pause (Space)"><svg viewBox="0 0 20 20" id="playIcon"><path d="M6.5 4v12l10-6z"/></svg></button>
+      <button class="tbtn icon toggle" id="btnLoop" title="Loop — drag across bars to choose (L clears)"><svg viewBox="0 0 20 20"><path d="M14 6H7a3.5 3.5 0 0 0 0 7h1M6 14h7a3.5 3.5 0 0 0 0-7h-1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M12 3.5 14.5 6 12 8.5M8 11.5 5.5 14 8 16.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="pos" id="pos">–</div>
     </div>
-    <div class="group">
-      <button class="ctl toggle" id="btnCountIn" title="Count-in before playing (C)"><span class="big">1·2·3</span><small>Count in</small></button>
-      <button class="ctl toggle" id="btnMetro" title="Metronome (M)"><svg viewBox="0 0 24 24"><path d="M9 3h6l4 18H5zM12 15l5-9" stroke="currentColor" stroke-width="1.6" fill="none"/></svg><small>Metronome</small></button>
-      <button class="ctl" id="btnSpeed" title="Playback speed (- / +)"><span class="big" id="speedLabel">100%</span><small>Speed</small></button>
-      <button class="ctl toggle" id="btnLoop" title="Loop: drag across bars to choose, click to clear (L)"><svg viewBox="0 0 24 24"><path d="M17 7H8a4 4 0 0 0 0 8h1M7 17h9a4 4 0 0 0 0-8h-1" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 4l3 3-3 3M9 14l-3 3 3 3" fill="none" stroke="currentColor" stroke-width="2"/></svg><small>Loop</small></button>
-    </div>
-    <div class="group">
-      <button class="ctl wide" id="btnTrack" title="Choose instrument / track (T)"><span class="inst-icon" id="trackIcon"></span><span class="track-name" id="trackLabel">Instrument</span><span class="caret">▾</span></button>
-      <button class="ctl" id="btnSound" title="Sound: recording / tab synth / volumes"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><small id="soundLabel">Synth</small></button>
-      <button class="ctl" id="btnSync" title="Match the tab to your audio file (S)"><svg viewBox="0 0 24 24"><path d="M3 12h3l2-6 3 12 3-9 2 3h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><small>Sync</small></button>
-      <button class="ctl" id="btnZoomOut" title="Smaller">A−</button>
-      <button class="ctl" id="btnZoomIn" title="Bigger">A+</button>
-      <button class="ctl toggle on" id="btnFollow" title="Auto-scroll with the cursor (F)"><svg viewBox="0 0 24 24"><path d="M12 4v13M6 12l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg><small>Follow</small></button>
+    <div class="bar-right">
+      <button class="tbtn select" id="btnTrack" title="Instrument (T)"><span class="inst-icon" id="trackIcon"></span><span class="track-name" id="trackLabel">Instrument</span><svg class="caret" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+      <span class="sep"></span>
+      <button class="tbtn select" id="btnSpeed" title="Playback speed (- / +)"><span id="speedLabel">100%</span><svg class="caret" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+      <button class="tbtn toggle" id="btnCountIn" title="Count-in before playing (C)">Count-in</button>
+      <button class="tbtn toggle" id="btnMetro" title="Metronome click (M)">Click</button>
+      <span class="sep"></span>
+      <button class="tbtn select" id="btnSound" title="Recording / synth / volumes"><span id="soundLabel">Synth</span><svg class="caret" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+      <button class="tbtn" id="btnSync" title="Match the tab to your recording (S)">Sync</button>
+      <span class="sep"></span>
+      <div class="stepper" title="Tab size">
+        <button class="tbtn icon" id="btnZoomOut" title="Smaller">−</button>
+        <span id="zoomLabel">130%</span>
+        <button class="tbtn icon" id="btnZoomIn" title="Bigger">+</button>
+      </div>
+      <button class="tbtn toggle on" id="btnFollow" title="Scroll with the cursor (F)">Follow</button>
     </div>
   </footer>
 

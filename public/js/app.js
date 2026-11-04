@@ -204,7 +204,7 @@ function togglePopover(pop, btn) {
   pop.style.left = Math.max(8, Math.min(window.innerWidth - pop.offsetWidth - 8, r.left + r.width / 2 - pop.offsetWidth / 2)) + 'px';
 }
 document.addEventListener('pointerdown', (e) => {
-  if (!e.target.closest('.popover') && !e.target.closest('.ctl')) closePopovers();
+  if (!e.target.closest('.popover') && !e.target.closest('.tbtn, .play')) closePopovers();
 });
 $('#btnTrack').addEventListener('click', (e) => { if (state.song) togglePopover($('#popTrack'), e.currentTarget); });
 $('#btnSpeed').addEventListener('click', (e) => togglePopover($('#popSpeed'), e.currentTarget));
@@ -250,19 +250,21 @@ bindToggle('#btnMetro', 'metronome');
 $('#btnFollow').addEventListener('click', () => { view.follow = !view.follow; $('#btnFollow').classList.toggle('on', view.follow); });
 $('#btnZoomIn').addEventListener('click', () => zoom(0.1));
 $('#btnZoomOut').addEventListener('click', () => zoom(-0.1));
-function zoom(d) { view.zoom = Math.max(0.7, Math.min(1.8, Math.round((view.zoom + d) * 10) / 10)); if (state.song) renderTrack(); savePrefs(); }
+function zoom(d) { view.zoom = Math.max(0.8, Math.min(2.2, Math.round((view.zoom + d) * 10) / 10)); showZoom(); if (state.song) renderTrack(); savePrefs(); }
+function showZoom() { $('#zoomLabel').textContent = Math.round(view.zoom * 100) + '%'; }
 function savePrefs() {
-  try { localStorage.setItem('fretline:prefs', JSON.stringify({ countIn: engine.opts.countIn, metronome: engine.opts.metronome, zoom: view.zoom })); } catch { /* ignore */ }
+  try { localStorage.setItem('fretline:prefs', JSON.stringify({ countIn: engine.opts.countIn, metronome: engine.opts.metronome, zoomLevel: view.zoom })); } catch { /* ignore */ }
 }
 function loadPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem('fretline:prefs') || '{}');
     if (p.countIn != null) engine.opts.countIn = p.countIn;
     if (p.metronome != null) engine.opts.metronome = p.metronome;
-    if (p.zoom) view.zoom = p.zoom;
+    if (p.zoomLevel) view.zoom = p.zoomLevel;
   } catch { /* ignore */ }
   $('#btnCountIn').classList.toggle('on', engine.opts.countIn);
   $('#btnMetro').classList.toggle('on', engine.opts.metronome);
+  showZoom();
 }
 
 // ---------------------------------------------------------------- transport
@@ -270,7 +272,7 @@ $('#btnPlay').addEventListener('click', () => { if (state.song) engine.toggle();
 $('#btnStop').addEventListener('click', () => { engine.stop(); updateCursor(true); view.scrollToRow(view.barLayout?.[engine.tl.played[playedAt(engine.tl, engine._pos)]?.barIndex]?.row ?? 0); });
 engine.on('state', () => {
   const playing = engine.playing || engine.countingIn;
-  $('#playIcon').innerHTML = playing ? '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>' : '<path d="M7 4.5v15l13-7.5z"/>';
+  $('#playIcon').innerHTML = playing ? '<path d="M5.5 4h3v12h-3zM11.5 4h3v12h-3z"/>' : '<path d="M6.5 4v12l10-6z"/>';
   $('#btnLoop').classList.toggle('on', !!engine.loop);
 });
 engine.on('countin', (i, n) => {
@@ -295,9 +297,21 @@ function updateCursor(force) {
   view.setCursor(pb.barIndex, Math.max(0, q), engine.playing);
   if (force && !engine.playing) view.ensureVisible(pb.barIndex);
   const total = engine.tl.played.length;
-  const audioT = engine.audioMode ? ` · ♪ ${fmtTime(engine.audio.currentTime)}` : '';
-  $('#pos').innerHTML = `Bar ${pb.barIndex + 1}${total !== state.song.masterBars.length ? ` <small>(${k + 1}/${total})</small>` : `/${total}`}<br>${fmtTime(t)} / ${fmtTime(engine.tl.duration)}${audioT}`;
+  const audioT = engine.audioMode ? ` · audio ${fmtTime(engine.playing ? engine.audio.currentTime : engine.sync.toAudio(t))}` : '';
+  const bars = state.song.masterBars.length;
+  $('#pos').innerHTML = `<b>Bar ${pb.barIndex + 1}</b> <span class="dim">of ${bars}${total !== bars ? ` · ${k + 1}/${total} played` : ''}</span><br>${fmtTime(t)} <span class="dim">/ ${fmtTime(engine.tl.duration)}${audioT}</span>`;
+  const dur = engine.tl.duration || 1;
+  $('#progressFill').style.width = Math.min(100, (t / dur) * 100) + '%';
+  const lp = $('#progressLoop');
+  if (engine.loop) { lp.style.display = 'block'; lp.style.left = (engine.loop.start / dur) * 100 + '%'; lp.style.width = ((engine.loop.end - engine.loop.start) / dur) * 100 + '%'; }
+  else lp.style.display = 'none';
 }
+$('#progress').addEventListener('click', (e) => {
+  if (!state.song) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  engine.seek(((e.clientX - r.left) / r.width) * engine.tl.duration);
+  updateCursor(true);
+});
 (function frame() { if (engine.playing) updateCursor(); requestAnimationFrame(frame); })();
 
 // click to seek, drag to loop

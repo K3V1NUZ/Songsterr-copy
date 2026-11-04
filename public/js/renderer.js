@@ -20,7 +20,8 @@ export class TabView {
     this.cursor = document.createElement('div');
     this.cursor.className = 'cursor';
     this.root.append(this.rowsEl, this.cursor);
-    this.zoom = 1;
+    this.k = 1;       // internal drawing unit (always 1; zoom scales the whole SVG)
+    this.zoom = 1.3;  // user zoom
     this.follow = true;
     this.handlers = {};
     this._curRow = -1;
@@ -47,23 +48,27 @@ export class TabView {
       this.lines = DRUM_ORDER.filter((d) => used.has(d));
       if (!this.lines.length) this.lines = ['hihat', 'snare', 'kick'];
     } else this.lines = this.track.tuning.map((m) => midiToName(m, false)).reverse(); // high string first
-    const Z = this.zoom;
+    const Z = this.k;
     const L = {
-      gap: 12 * Z, top: 46 * Z, rhythm: 32 * Z, bottom: 8 * Z, left: 30, leftRest: 6,
+      gap: 13 * Z, top: 46 * Z, rhythm: 32 * Z, bottom: 10 * Z, left: 30, leftRest: 6,
     };
     L.tabH = (this.lines.length - 1) * L.gap;
     L.rowH = L.top + L.tabH + L.rhythm + L.bottom;
     this.L = L;
-    const width = Math.max(320, this.root.clientWidth - 24);
+    const pxWidth = Math.max(300, this.root.clientWidth - 24);
+    // phones get a smaller effective size so a bar still fits on a row
+    const S = this.zoom * (pxWidth < 600 ? 0.72 : 1);
+    this.scale = S;
+    const width = pxWidth / S; // logical width; the SVG is scaled up by S
 
     // measure bars
     const bars = this.track.bars.map((bar, i) => {
       const mb = song.masterBars[i];
       const prev = song.masterBars[i - 1];
       const showTime = !prev || prev.time[0] !== mb.time[0] || prev.time[1] !== mb.time[1];
-      const lead = (showTime ? 20 : 0) * Z + (mb.repeatStart ? 10 : 0) + 8 * Z;
-      const beatW = bar.beats.map((b) => (b.fullRest ? 44 : 12 + 19 * Math.pow(b.q, 0.55)) * Z);
-      const w = lead + beatW.reduce((a, b) => a + b, 0) + 4 * Z + (mb.repeatEnd ? 10 : 0);
+      const lead = (showTime ? 22 : 0) * Z + (mb.repeatStart ? 10 : 0) + 12 * Z;
+      const beatW = bar.beats.map((b) => (b.fullRest ? 56 : 17 + 26 * Math.pow(b.q, 0.6)) * Z);
+      const w = lead + beatW.reduce((a, b) => a + b, 0) + 6 * Z + (mb.repeatEnd ? 10 : 0);
       return { i, bar, mb, showTime, lead, beatW, w };
     });
     // pack rows
@@ -85,7 +90,7 @@ export class TabView {
       const left = leftOf(ri);
       const avail = width - left;
       const scale = isLast ? Math.min(1.15, avail / total) : avail / total;
-      const svg = el('svg', { width, height: L.rowH, class: 'row' });
+      const svg = el('svg', { width: pxWidth, height: L.rowH * S, viewBox: `0 0 ${width} ${L.rowH}`, class: 'row' });
       const rowDiv = document.createElement('div');
       rowDiv.className = 'row-wrap';
       rowDiv.appendChild(svg);
@@ -126,7 +131,7 @@ export class TabView {
         if (b === rowBars[rowBars.length - 1]) barLine(bx + bw);
         // header annotations
         this._text(gNotes, bx + 3, y0 - 4, String(b.i + 1), 'barnum');
-        let annY = 13 * this.zoom;
+        let annY = 13 * this.k;
         let annX = bx + 2;
         if (b.mb.section) {
           const t = this._text(gNotes, annX + 4, annY, b.mb.section, 'section');
@@ -144,15 +149,15 @@ export class TabView {
         if (b.mb.ending) this._ending(gNotes, bx, bw, y0, b.mb.ending);
         if (b.mb.text) this._text(gNotes, annX, annY, b.mb.text, 'bartext');
         if (b.showTime) {
-          const tx = bx + (b.mb.repeatStart ? 22 : 12) * this.zoom;
+          const tx = bx + (b.mb.repeatStart ? 22 : 12) * this.k;
           this._text(gNotes, tx, y0 + L.tabH / 2 - 2, String(b.mb.time[0]), 'timesig', 'middle');
-          this._text(gNotes, tx, y0 + L.tabH / 2 + 16 * this.zoom, String(b.mb.time[1]), 'timesig', 'middle');
+          this._text(gNotes, tx, y0 + L.tabH / 2 + 16 * this.k, String(b.mb.time[1]), 'timesig', 'middle');
         }
         // beats
         let bxx = bx + b.lead * scale;
         b.bar.beats.forEach((beat, bi) => {
           const w = b.beatW[bi] * scale;
-          const cx = b.bar.beats.length === 1 && beat.fullRest ? bx + bw / 2 : bxx + 9 * this.zoom;
+          const cx = b.bar.beats.length === 1 && beat.fullRest ? bx + bw / 2 : bxx + 9 * this.k;
           layout.beats.push({ x: cx, pos: beat.pos, q: beat.q });
           const g = el('g', { class: 'beat' }, gNotes);
           layout.beatEls.push(g);
@@ -183,7 +188,7 @@ export class TabView {
     el('circle', { cx: x, cy: y0 + h * 0.62, r: 2.2, class: 'dot' }, g);
   }
   _ending(g, bx, bw, y0, list) {
-    const y = y0 - 34 * this.zoom;
+    const y = y0 - 34 * this.k;
     el('path', { d: `M${bx + 2},${y + 10} V${y} H${bx + bw - 4}`, class: 'ending' }, g);
     this._text(g, bx + 18, y + 10, list.join('.') + '.', 'small');
   }
@@ -210,9 +215,9 @@ export class TabView {
       if (n.harmonic) label = `<${n.fret}>`;
       if (n.ghost) label = `(${n.fret})`;
       if (n.tie) label = `(${n.fret})`;
-      const w = label.length * 7 * this.zoom + 3;
-      el('rect', { x: cx - w / 2, y: y - 6.5 * this.zoom, width: w, height: 13 * this.zoom, class: 'note-bg' }, g);
-      const t = this._text(g, cx, y + 4.2 * this.zoom, label, 'fret' + (n.tie ? ' tie' : ''), 'middle');
+      const w = label.length * 7 * this.k + 3;
+      el('rect', { x: cx - w / 2, y: y - 6.5 * this.k, width: w, height: 13 * this.k, class: 'note-bg' }, g);
+      const t = this._text(g, cx, y + 4.2 * this.k, label, 'fret' + (n.tie ? ' tie' : ''), 'middle');
       if (n.bend) {
         const amt = n.bend === 2 ? 'full' : n.bend === 1 ? '½' : n.bend === 4 ? '2' : String(n.bend / 2);
         el('path', { d: `M${cx + w / 2},${y} Q${cx + 14},${y} ${cx + 14},${y0 - 12}`, class: 'bend' }, g);
@@ -264,7 +269,7 @@ export class TabView {
   }
 
   _drawRhythm(g, b, layout, yTabBottom) {
-    const Z = this.zoom;
+    const Z = this.k;
     const yA = yTabBottom + 8 * Z, yB = yTabBottom + 28 * Z;
     const beats = b.bar.beats;
     const [num, den] = b.mb.time;
@@ -348,8 +353,9 @@ export class TabView {
     const row = this.rows[lay.row];
     const top = row.el.offsetTop;
     this.cursor.style.display = 'block';
-    this.cursor.style.height = this.L.rowH - 8 + 'px';
-    this.cursor.style.transform = `translate(${x - 1 + row.el.offsetLeft}px, ${top + 4}px)`;
+    const S = this.scale;
+    this.cursor.style.height = (this.L.rowH - 8) * S + 'px';
+    this.cursor.style.transform = `translate(${x * S - 1 + row.el.offsetLeft}px, ${top + 4 * S}px)`;
     if (this._curBar !== barIndex) {
       this.barLayout[this._curBar]?.bg.classList.remove('current');
       lay.bg.classList.add('current');
@@ -395,7 +401,7 @@ export class TabView {
   _hit(e) {
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
-    const x = e.clientX - rect.left;
+    const x = (e.clientX - rect.left) / this.scale;
     const ri = this.rows.findIndex((r) => r.svg === svg);
     const lay = this.barLayout.find((l) => l && l.row === ri && x >= l.x && x < l.x + l.w);
     if (!lay) return null;
