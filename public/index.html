@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fretline</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e8543e'/%3E%3Cpath d='M6 10h20M6 16h20M6 22h20' stroke='white' stroke-width='2'/%3E%3Crect x='15' y='5' width='3' height='22' fill='%23222'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo"></span><span class="word">Fretline</span></div>
+    <button class="searchbox" id="openSearch" title="Search your library (/)">
+      <svg viewBox="0 0 24 24" width="17" height="17"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span id="songLabel">Search your tabs…</span>
+    </button>
+    <div class="top-actions">
+      <button class="ghost" id="btnImport" title="Add a MusicXML or Guitar Pro file">Import</button>
+      <button class="ghost" id="btnEdit" title="Edit the MusicXML source of this song">Edit</button>
+      <button class="ghost" id="btnHelp" title="Keyboard shortcuts & format help">?</button>
+    </div>
+  </header>
+
+  <main id="score" class="score" tabindex="-1">
+    <div class="song-head" id="songHead"></div>
+    <div id="tab"></div>
+    <div class="empty" id="empty">
+      <h2>Your personal tab library</h2>
+      <p>Click the search bar to open a song, or <b>Import</b> a MusicXML or Guitar Pro file.</p>
+    </div>
+  </main>
+
+  <div class="countin" id="countin"></div>
+  <div class="toast" id="toast"></div>
+
+  <!-- bottom control bar -->
+  <footer class="controls" id="controls">
+    <div class="progress" id="progress" title="Click to jump"><div class="progress-loop" id="progressLoop"></div><div class="progress-fill" id="progressFill"></div></div>
+    <div class="bar-left">
+      <button class="tbtn icon" id="btnStop" title="Back to start (Home)"><svg viewBox="0 0 20 20"><path d="M5 4h2v12H5zM8.5 10 16 4.5v11z"/></svg></button>
+      <button class="play" id="btnPlay" title="Play / pause (Space)"><svg viewBox="0 0 20 20" id="playIcon"><path d="M6.5 4v12l10-6z"/></svg></button>
+      <button class="tbtn icon toggle" id="btnLoop" title="Loop — drag across bars to choose (L clears)"><svg viewBox="0 0 20 20"><path d="M14 6H7a3.5 3.5 0 0 0 0 7h1M6 14h7a3.5 3.5 0 0 0 0-7h-1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M12 3.5 14.5 6 12 8.5M8 11.5 5.5 14 8 16.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="pos" id="pos">–</div>
+    </div>
+    <div class="bar-right">
+      <button class="tbtn select" id="btnTrack" title="Instrument (T)"><span class="inst-icon" id="trackIcon"></span><span class="track-name" id="trackLabel">Instrument</span><svg class="caret" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+      <span class="sep"></span>
+      <button class="tbtn select" id="btnSpeed" title="Playback speed (- / +)"><span id="speedLabel">100%</span><svg class="caret" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+      <button class="tbtn toggle" id="btnCountIn" title="Count-in before playing (C)">Count-in</button>
+      <button class="tbtn toggle" id="btnMetro" title="Metronome click (M)">Click</button>
+      <span class="sep"></span>
+      <button class="tbtn select" id="btnSound" title="Recording / synth / volumes"><span id="soundLabel">Synth</span><svg class="caret" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+      <button class="tbtn" id="btnSync" title="Match the tab to your recording (S)">Sync</button>
+      <span class="sep"></span>
+      <div class="stepper" title="Tab size">
+        <button class="tbtn icon" id="btnZoomOut" title="Smaller">−</button>
+        <span id="zoomLabel">130%</span>
+        <button class="tbtn icon" id="btnZoomIn" title="Bigger">+</button>
+      </div>
+      <button class="tbtn toggle on" id="btnFollow" title="Scroll with the cursor (F)">Follow</button>
+    </div>
+  </footer>
+
+  <!-- popovers -->
+  <div class="popover" id="popTrack"></div>
+  <div class="popover" id="popSpeed">
+    <div class="speed-presets"></div>
+    <input type="range" id="speedRange" min="25" max="150" step="5" value="100">
+  </div>
+  <div class="popover" id="popSound">
+    <label class="row"><input type="checkbox" id="optAudio" checked> <span>Recording (audio file)</span></label>
+    <div class="row slider"><span>Volume</span><input type="range" id="volAudio" min="0" max="1" step="0.05" value="1"></div>
+    <label class="row"><input type="checkbox" id="optSynth" checked> <span>Tab synth (hear the notes)</span></label>
+    <div class="row slider"><span>Volume</span><input type="range" id="volSynth" min="0" max="1.5" step="0.05" value="0.8"></div>
+    <p class="hint" id="soundHint"></p>
+  </div>
+
+  <!-- search modal -->
+  <div class="modal" id="searchModal">
+    <div class="sheet search-sheet">
+      <div class="search-input-wrap">
+        <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="searchInput" placeholder="Search by song, artist or instrument…" autocomplete="off">
+        <kbd>Esc</kbd>
+      </div>
+      <ul class="results" id="results"></ul>
+      <div class="sheet-foot">
+        <button class="ghost" id="btnImport2">+ Import new song</button>
+        <label class="ghost file-btn">Open local files…<input type="file" id="localFiles" multiple accept=".musicxml,.xml,.mxl,.gp,.gp3,.gp4,.gp5,.gpx,.json,audio/*"></label>
+      </div>
+    </div>
+  </div>
+
+  <!-- import modal -->
+  <div class="modal" id="importModal">
+    <div class="sheet wide-sheet">
+      <div class="sheet-head"><h3>Import a song</h3><button class="x" data-close>×</button></div>
+      <div class="tabs">
+        <button class="tab on" data-pane="paneFile">MusicXML / Guitar Pro file</button>
+        <button class="tab" data-pane="panePaste">Paste MusicXML</button>
+        <button class="tab" data-pane="paneAI">Convert with AI</button>
+        <button class="tab" data-pane="paneAscii">Convert ASCII tab</button>
+      </div>
+      <div class="pane on" id="paneFile">
+        <label class="dropzone" id="scoreDrop">
+          <input type="file" id="scoreFile" accept=".musicxml,.xml,.mxl,.gp,.gp3,.gp4,.gp5,.gpx">
+          <svg viewBox="0 0 24 24" width="34" height="34"><path d="M12 15V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <b>Drop a MusicXML or Guitar Pro file here</b>
+          <span>or click to choose · .musicxml .xml .mxl · .gp3 .gp4 .gp5 .gpx .gp</span>
+        </label>
+        <div id="scoreInfo" class="score-info"></div>
+        <p class="hint">The file is stored in your library as it is. Exported from MuseScore, Guitar Pro, TuxGuitar or written by an AI — all the same. Sheet music without tab data gets string/fret positions worked out automatically.</p>
+      </div>
+      <div class="pane" id="panePaste">
+        <p class="hint">Paste the MusicXML an AI gave you (or any MusicXML text). Problems — broken XML, bars that don't add up, pitches that don't match the frets — are listed live; click one to jump to its line.</p>
+        <textarea id="importText" spellcheck="false" placeholder="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&#10;&lt;score-partwise version=&quot;4.0&quot;&gt; …"></textarea>
+        <div class="issues" id="importIssues"></div>
+      </div>
+      <div class="pane" id="paneAI">
+        <p class="hint">Give an AI assistant the link to a tab (or screenshots of it) together with this prompt. It answers with a MusicXML file — paste it under <b>Paste MusicXML</b>, or save it as <code>.musicxml</code> and drop it in.</p>
+        <textarea id="aiPrompt" readonly spellcheck="false"></textarea>
+        <button class="primary" id="btnCopyPrompt">Copy prompt</button>
+      </div>
+      <div class="pane" id="paneAscii">
+        <p class="hint">Paste a classic ASCII tab (<code>e|---0---3---|</code>). It is converted to MusicXML. Notes are exact; the <b>rhythm is estimated</b> from the spacing.</p>
+        <div class="row">
+          <span>Title</span><input id="asciiTitle" placeholder="Song title">
+          <span>Artist</span><input id="asciiArtist" placeholder="Artist">
+          <span>Tempo</span><input id="asciiTempo" type="number" value="100" style="width:70px">
+          <span>Time</span><input id="asciiTime" value="4/4" style="width:60px">
+        </div>
+        <textarea id="asciiText" spellcheck="false" placeholder="e|-----0-----|-----------|&#10;B|---1---1---|---3---3---|&#10;G|-2-------2-|-0-------0-|&#10;D|-----------|-----------|&#10;A|-0---------|-----------|&#10;E|-----------|-3---------|"></textarea>
+        <button class="primary" id="btnAsciiConvert">Convert → MusicXML</button>
+      </div>
+      <div class="sheet-foot" id="importFoot">
+        <span class="hint" style="margin-right:auto">Audio file (optional): <input type="file" id="importAudio" accept="audio/*"></span>
+        <button class="primary" id="btnDoImport">Add to library</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- editor modal -->
+  <div class="modal" id="editModal">
+    <div class="sheet wide-sheet">
+      <div class="sheet-head"><h3>Edit MusicXML source</h3><button class="x" data-close>×</button></div>
+      <p class="hint" id="editNote" style="padding: 0 22px"></p>
+      <textarea id="editText" spellcheck="false"></textarea>
+      <div class="issues" id="editIssues"></div>
+      <div class="sheet-foot">
+        <a class="ghost" href="docs/AI_CONVERSION_PROMPT.md" target="_blank">MusicXML cheat sheet</a>
+        <button class="ghost" id="btnEditApply">Preview</button>
+        <button class="ghost" id="btnEditDownload">Download .musicxml</button>
+        <button class="primary" id="btnEditSave">Save to library</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- sync panel -->
+  <div class="sync-panel" id="syncPanel">
+    <div class="sheet-head"><h3>Match tab ↔ audio</h3><button class="x" id="syncClose">×</button></div>
+    <div id="syncNoAudio" class="hint"></div>
+    <div id="syncBody">
+      <div class="sync-step">
+        <b>1. Where does bar 1 start?</b>
+        <div class="row">
+          <span class="mono big" id="offsetVal">0.000 s</span>
+          <button class="ghost" data-nudge="-0.1">−0.1</button><button class="ghost" data-nudge="-0.01">−0.01</button>
+          <button class="ghost" data-nudge="0.01">+0.01</button><button class="ghost" data-nudge="0.1">+0.1</button>
+          <button class="ghost" id="btnSetOffset" title="Play the audio, pause exactly on the first beat of bar 1, then press">Bar 1 = audio position</button>
+        </div>
+      </div>
+      <div class="sync-step">
+        <b>2. Tap along to lock the tempo</b>
+        <p class="hint">Press <b>Tap</b> (or the <kbd>K</kbd> key) on the first beat of every bar while the recording plays. Each tap pins that bar to the audio, so the cursor follows tempo changes and live drift. You only need a few taps spread through the song — the rest is interpolated.</p>
+        <div class="row">
+          <span>Start tapping at bar</span><input type="number" id="tapStart" value="1" min="1" style="width:64px">
+          <span>every</span><select id="tapEvery"><option>1</option><option selected>2</option><option>4</option><option>8</option></select><span>bars</span>
+          <button class="primary" id="btnTap">Tap (K)</button>
+          <span class="mono" id="tapInfo"></span>
+        </div>
+        <div class="row"><span>Tap latency compensation</span><input type="number" id="tapLatency" value="0.06" step="0.01" style="width:70px"> s</div>
+      </div>
+      <div class="sync-step">
+        <b>Sync points</b> <span class="hint" id="tempoInfo"></span>
+        <div id="anchorList" class="anchors"></div>
+        <div class="row"><button class="ghost" id="btnClearSync">Clear all</button><button class="ghost" id="btnAnchorHere" title="Pin the bar under the cursor to the current audio time">Pin current bar here</button></div>
+      </div>
+      <div class="sheet-foot">
+        <label class="ghost file-btn">Attach audio file…<input type="file" id="attachAudio" accept="audio/*"></label>
+        <button class="primary" id="btnSyncSave">Save sync to file</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="helpModal">
+    <div class="sheet wide-sheet">
+      <div class="sheet-head"><h3>Shortcuts</h3><button class="x" data-close>×</button></div>
+      <table class="keys">
+        <tr><td><kbd>Space</kbd></td><td>Play / pause</td><td><kbd>Home</kbd></td><td>Back to start</td></tr>
+        <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Previous / next bar</td><td><kbd>/</kbd></td><td>Search</td></tr>
+        <tr><td><kbd>C</kbd></td><td>Count-in on/off</td><td><kbd>M</kbd></td><td>Metronome</td></tr>
+        <tr><td><kbd>-</kbd> <kbd>+</kbd></td><td>Speed down / up</td><td><kbd>L</kbd></td><td>Clear loop</td></tr>
+        <tr><td><kbd>T</kbd></td><td>Next instrument</td><td><kbd>S</kbd></td><td>Sync panel</td></tr>
+        <tr><td><kbd>K</kbd></td><td>Tap bar (sync)</td><td><kbd>F</kbd></td><td>Follow cursor</td></tr>
+      </table>
+      <p class="hint">Click a note/bar to jump there. Drag across bars to loop them. Shift-click extends the loop.</p>
+      <p class="hint">Songs are standard MusicXML or Guitar Pro files. <a href="docs/AI_CONVERSION_PROMPT.md" target="_blank">AI conversion prompt &amp; MusicXML cheat sheet</a></p>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

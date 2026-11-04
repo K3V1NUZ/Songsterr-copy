@@ -1,0 +1,14 @@
+{
+  "name": "fretline",
+  "version": "0.1.0",
+  "description": "Offline, free, personal guitar tab player with audio sync (MusicXML + Guitar Pro)",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "validate": "node tools/validate.js",
+    "convert": "node tools/convert.js",
+    "demo-audio": "node tools/render-wav.js library/greensleeves/song.musicxml library/greensleeves/audio.wav --lead 2.0 --tempo-scale 0.96",
+    "test": "node tools/selftest.js"
+  },
+  "license": "MIT"
+}
