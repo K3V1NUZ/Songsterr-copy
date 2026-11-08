@@ -11,6 +11,7 @@ export function scoreTimingFromAlphaTab(score: model.Score): ScoreTiming {
       isRepeatStart: mb.isRepeatStart,
       repeatCount: mb.isRepeatEnd ? Math.max(2, mb.repeatCount) : 0,
       alternateEndings: mb.alternateEndings,
+      timeSignature: [mb.timeSignatureNumerator, mb.timeSignatureDenominator],
     })),
   };
 }

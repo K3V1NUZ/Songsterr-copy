@@ -21,6 +21,8 @@ export interface BarTiming {
   repeatCount: number;
   /** Bitmask of alternate endings this bar belongs to (bit 0 = ending 1). 0 = not an ending. */
   alternateEndings: number;
+  /** [numerator, denominator]; defaults to 4/4 when missing. */
+  timeSignature?: [number, number];
 }
 
 export interface ScoreTiming {
@@ -43,6 +45,7 @@ export interface PlayedBar {
   durationMs: number;
   /** Tempo segments inside the bar: [{beat offset from bar start, bpm}] — always starts at 0. */
   segments: Array<{ beat: number; bpm: number }>;
+  timeSignature: [number, number];
 }
 
 export interface Timeline {
@@ -102,7 +105,7 @@ export function buildTimeline(timing: ScoreTiming): Timeline {
       const end = k + 1 < segments.length ? segments[k + 1]!.beat : bar.quarters;
       durationMs += ((end - s.beat) * 60000) / s.bpm;
     });
-    played.push({ index, barIndex, occurrence, startBeat: beat, quarters: bar.quarters, startMs: ms, durationMs, segments });
+    played.push({ index, barIndex, occurrence, startBeat: beat, quarters: bar.quarters, startMs: ms, durationMs, segments, timeSignature: bar.timeSignature ?? [4, 4] });
     beat += bar.quarters;
     ms += durationMs;
   });
@@ -166,4 +169,31 @@ export function bpmAtBeat(tl: Timeline, beat: number): number {
   let bpm = p.segments[0]!.bpm;
   for (const s of p.segments) if (s.beat <= beat - p.startBeat) bpm = s.bpm;
   return bpm;
+}
+
+export interface Click {
+  /** Absolute beat (quarter notes, played order). */
+  beat: number;
+  /** First click of a bar. */
+  accent: boolean;
+  /** Index into Timeline.played. */
+  played: number;
+}
+
+/** How a time signature is counted: compound meters (6/8, 9/8, 12/8) count dotted quarters. */
+export function countPattern([n, d]: [number, number]): { stepQuarters: number; count: number } {
+  if (d === 8 && n % 3 === 0 && n > 3) return { stepQuarters: 1.5, count: n / 3 };
+  return { stepQuarters: 4 / d, count: n };
+}
+
+/** Metronome click positions for the whole timeline. */
+export function metronomeClicks(tl: Timeline): Click[] {
+  const out: Click[] = [];
+  for (const p of tl.played) {
+    const { stepQuarters, count } = countPattern(p.timeSignature);
+    for (let i = 0; i < count && i * stepQuarters < p.quarters - 1e-9; i++) {
+      out.push({ beat: p.startBeat + i * stepQuarters, accent: i === 0, played: p.index });
+    }
+  }
+  return out;
 }

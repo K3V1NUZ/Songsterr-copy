@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTimeline, playOrder, beatToScoreMs, type BarTiming, type ScoreTiming } from '@/sync/timeline';
+import { buildTimeline, playOrder, beatToScoreMs, metronomeClicks, type BarTiming, type ScoreTiming } from '@/sync/timeline';
 import { createSyncMap, pinSyncPoint, shiftSyncPoints, syncPointsFromOffset } from '@/sync/syncMap';
 import type { SyncPoint } from '@/data/types';
 
@@ -102,5 +102,20 @@ describe('sync point helpers', () => {
     const pts = [sp(0, 0), sp(1, 4000), sp(2, 8000), sp(3, 12000)];
     const out = pinSyncPoint(tl, pts, sp(1, 9000));
     expect(out.map((p) => [p.barIndex, p.millisecondOffset])).toEqual([[0, 0], [1, 9000], [3, 12000]]);
+  });
+});
+
+describe('metronome clicks', () => {
+  it('clicks every beat with an accent on the downbeat', () => {
+    const tl = buildTimeline(timing([bar({ timeSignature: [3, 4], quarters: 3 }), bar({ timeSignature: [3, 4], quarters: 3 })]));
+    expect(metronomeClicks(tl).map((c) => [c.beat, c.accent])).toEqual([[0, true], [1, false], [2, false], [3, true], [4, false], [5, false]]);
+  });
+  it('counts compound meters in dotted quarters and follows repeats', () => {
+    const tl = buildTimeline(timing([bar({ timeSignature: [6, 8], quarters: 3, isRepeatStart: true, repeatCount: 2 })]));
+    expect(metronomeClicks(tl).map((c) => c.beat)).toEqual([0, 1.5, 3, 4.5]);
+  });
+  it('handles eighth-note meters like 7/8', () => {
+    const tl = buildTimeline(timing([bar({ timeSignature: [7, 8], quarters: 3.5 })]));
+    expect(metronomeClicks(tl)).toHaveLength(7);
   });
 });
