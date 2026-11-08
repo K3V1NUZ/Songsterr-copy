@@ -186,10 +186,10 @@ export function PlayerPage() {
 
         {/* the tab — the only thing that scrolls */}
         <main ref={setScrollEl} className="min-w-0 flex-1 touch-pan-y overflow-y-auto">
-          <div className={cx('mx-auto px-3 pt-5 md:px-4', compact && 'max-w-[1200px] md:px-10')}>
-            <h1 className="text-[22px] leading-tight font-semibold">{active.title}</h1>
+          <div className={cx('mx-auto flex flex-col items-center px-3 pt-6 text-center md:px-4', compact && 'max-w-[1200px] md:px-10')}>
+            <h1 className="text-[28px] leading-tight font-bold tracking-tight md:text-[34px]">{active.title}</h1>
             {active.artist && (
-              <button type="button" title={`More songs by ${active.artist}`} className="text-ink-2 hover:text-accent hover:underline"
+              <button type="button" title={`More songs by ${active.artist}`} className="mt-1 text-[17px] text-ink-2 hover:text-accent hover:underline md:text-lg"
                 onClick={() => { setQuery(active.artist); focusSearch(); }}>{active.artist}</button>
             )}
             {playerError && <p className="text-danger">{playerError}</p>}
