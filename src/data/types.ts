@@ -70,6 +70,8 @@ export interface Song {
   syncSource: SyncSource;
   /** 0..1, how sure auto-sync was. */
   syncConfidence?: number;
+  /** The last auto-sync result, kept so manual edits can be reset to it. */
+  autoSyncPoints?: SyncPoint[];
   /** Increases on every sync-point change (used for conflict handling when shared). */
   syncVersion: number;
   ownerId?: Id;
