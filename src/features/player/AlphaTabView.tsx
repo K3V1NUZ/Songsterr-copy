@@ -3,7 +3,7 @@
 // in 'synth' mode alphaTab plays the score itself (no recording attached).
 import { useEffect, useRef } from 'react';
 import { AlphaTabApi, LayoutMode, model, NotationElement, PlayerMode, ScrollMode, Settings, StaveProfile, TabRhythmMode } from '@coderline/alphatab';
-import { patchTabStems, styleScore } from './alphaTabTweaks';
+import { patchTabStems, setTempoLabels, styleScore } from './alphaTabTweaks';
 
 export type ScoreView = 'tab' | 'tab+score' | 'score';
 export type AudioMode = 'media' | 'synth';
@@ -16,6 +16,8 @@ export interface AlphaTabViewProps {
   /** 'auto' = as many as fit (changes with zoom), or a fixed number per row. */
   barsPerRow: 'auto' | number;
   mode: AudioMode;
+  /** Tempo labels to show above bars instead of the score's own (masterbar index -> BPM text). */
+  tempoLabels?: Map<number, string> | null;
   /** Element alphaTab scrolls to keep the cursor visible. */
   scrollElement?: HTMLElement | null;
   onApi?: (api: AlphaTabApi | null) => void;
@@ -50,7 +52,7 @@ const PROFILE = { tab: StaveProfile.Tab, 'tab+score': StaveProfile.ScoreTab, sco
 const RHYTHM = { tab: TabRhythmMode.ShowWithBars, 'tab+score': TabRhythmMode.Hidden, score: TabRhythmMode.Hidden } as const;
 const PLAYER_MODE = { media: PlayerMode.EnabledExternalMedia, synth: PlayerMode.EnabledSynthesizer } as const;
 
-export function AlphaTabView({ data, trackIndex, view, zoom, barsPerRow, mode, scrollElement, onApi, onScoreLoaded, onRendered, onError }: AlphaTabViewProps) {
+export function AlphaTabView({ data, trackIndex, view, zoom, barsPerRow, mode, tempoLabels, scrollElement, onApi, onScoreLoaded, onRendered, onError }: AlphaTabViewProps) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<AlphaTabApi | null>(null);
   const callbacks = useRef({ onApi, onScoreLoaded, onRendered, onError });
@@ -108,6 +110,15 @@ export function AlphaTabView({ data, trackIndex, view, zoom, barsPerRow, mode, s
       api.current = null;
     };
   }, [mode, scrollElement]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // tempo labels: compare by content so a new Map with the same labels doesn't re-render
+  const labelsKey = tempoLabels ? JSON.stringify([...tempoLabels]) : '';
+  const firstLabels = useRef(true);
+  useEffect(() => {
+    setTempoLabels(tempoLabels ?? null);
+    if (firstLabels.current) { firstLabels.current = false; return; }
+    if (api.current?.score) api.current.render();
+  }, [labelsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { api.current?.load(data, [trackIndex]); }, [data, mode, scrollElement]); // eslint-disable-line react-hooks/exhaustive-deps
 

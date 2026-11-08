@@ -15,6 +15,15 @@ export interface SyncPoint {
   millisecondOffset: number;
 }
 
+/** "From this bar on the recording plays at `bpm`" (quarter notes per minute). See sync/tempoMarks.ts. */
+export interface TempoMark {
+  barIndex: number;
+  barOccurence: number;
+  /** Time of the bar start in the recording. Free for the first mark, derived for the others. */
+  millisecondOffset: number;
+  bpm: number;
+}
+
 export type ScoreFormat = 'musicxml' | 'mxl' | 'gp3' | 'gp4' | 'gp5' | 'gpx' | 'gp';
 export type FileKind = 'score' | 'audio' | 'stem';
 export type SyncSource = 'none' | 'auto' | 'manual';
@@ -67,6 +76,8 @@ export interface Song {
   parts: Part[];
   stems: Stem[];
   syncPoints: SyncPoint[];
+  /** The editable sync (tempo marks); `syncPoints` are derived from them when present. */
+  tempoMarks?: TempoMark[];
   syncSource: SyncSource;
   /** 0..1, how sure auto-sync was. */
   syncConfidence?: number;

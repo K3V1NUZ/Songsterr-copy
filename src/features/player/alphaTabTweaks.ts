@@ -61,7 +61,16 @@ interface TabRenderer {
 
 /** y (relative to the renderer) just below the lowest string. */
 const belowStrings = (r: TabRenderer) => r.getLineY(r.bar.staff.tuning.length - 1) + r.lineSpacing * 0.6;
-interface RendererFactory { staffId: string; create(...args: unknown[]): object }
+interface EffectInfo {
+  effectId: string;
+  shouldCreateGlyph(renderer: unknown, beat: TempoBeat): boolean;
+  createNewGlyph(renderer: unknown, beat: TempoBeat): object;
+}
+interface TempoBeat {
+  index: number;
+  voice: { index: number; bar: { staff: { index: number }; masterBar: { index: number; tempoAutomations: unknown[] } } };
+}
+interface RendererFactory { staffId: string; create(...args: unknown[]): object; effectBands?: Array<{ effect: EffectInfo }> }
 
 let patched = false;
 
@@ -142,5 +151,37 @@ function patchTimeSignature(proto: TimeSigGlyph): void {
     canvas.fillText(String(this._numerator), x, y - q);
     canvas.fillText(String(this._denominator), x, y + q);
     Object.assign(canvas, { font: oldFont, color: oldColor, textAlign, textBaseline });
+  };
+}
+
+// ---- tempo marking ("♩ = 120" above the bar) --------------------------------------------------
+
+let tempoOverride: Map<number, string> | null = null;
+let tempoPatched = false;
+
+/**
+ * Replaces the score's tempo markings with these labels (masterbar index -> text), e.g. the
+ * recording's tempo marks. `null` shows the score's own tempo again. Re-render to apply.
+ */
+export function setTempoLabels(labels: Map<number, string> | null): void {
+  tempoOverride = labels;
+  if (tempoPatched) return;
+  const factories = (Environment as unknown as { defaultRenderers?: RendererFactory[] }).defaultRenderers ?? [];
+  const info = factories.flatMap((f) => f.effectBands ?? []).map((b) => b.effect).find((e) => e.effectId === 'EffectTempo');
+  if (!info) return;
+  tempoPatched = true;
+  const should = info.shouldCreateGlyph.bind(info);
+  const create = info.createNewGlyph.bind(info);
+  info.shouldCreateGlyph = (renderer, beat) => {
+    if (!tempoOverride) return should(renderer, beat);
+    return beat.voice.bar.staff.index === 0 && beat.voice.index === 0 && beat.index === 0 && tempoOverride.has(beat.voice.bar.masterBar.index);
+  };
+  info.createNewGlyph = (renderer, beat) => {
+    const label = tempoOverride?.get(beat.voice.bar.masterBar.index);
+    if (label === undefined) return create(renderer, beat);
+    // the glyph only reads these fields of a tempo automation
+    const automation = { value: label, text: '', ratioPosition: 0, isVisible: true };
+    const fake: TempoBeat = { ...beat, voice: { ...beat.voice, bar: { ...beat.voice.bar, masterBar: { ...beat.voice.bar.masterBar, tempoAutomations: [automation] } } } };
+    return create(renderer, fake);
   };
 }

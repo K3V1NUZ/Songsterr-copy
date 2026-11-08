@@ -1,6 +1,6 @@
 // Player (design A2): instruments panel left, the tab in the middle (the only thing
 // that scrolls), mixer as a right panel, sync tool as a bottom drawer, bottom bar.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AlphaTabApi } from '@coderline/alphatab';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { instrumentIcon } from '@/components/icons';
@@ -8,6 +8,7 @@ import { cx, TrackItem } from '@/components/ui';
 import { repo } from '@/app/repo';
 import type { Song } from '@/data/types';
 import { SyncPanel } from '@/features/sync/SyncPanel';
+import { marksFromSyncPoints, tempoLabels } from '@/sync/tempoMarks';
 import { useSettings } from '@/store/settings';
 import { useUi } from '@/store/ui';
 import { AlphaTabView, type ScoreView } from './AlphaTabView';
@@ -42,7 +43,7 @@ export function PlayerPage() {
   const [partState, setPartState] = useState<Record<number, { muted?: boolean; solo?: boolean }>>({});
   const playerError = usePlayer((s) => s.error);
   const positionMs = usePlayer((s) => s.positionMs);
-  usePlayer((s) => s.scoreVersion);
+  const scoreVersion = usePlayer((s) => s.scoreVersion);
 
   // load the song (and its view settings); the song object lives in the UI store so
   // edits made in the edit panel show up here too
@@ -76,6 +77,13 @@ export function PlayerPage() {
   }, [active, data?.fileId]);
 
   const mode = active?.audioFileId ? 'media' : 'synth';
+
+  // the recording's tempo (from the sync) above the bars where it changes
+  const tl = controller?.scoreTimeline;
+  const labels = useMemo(() => {
+    if (mode !== 'media' || !active || !tl || (!active.tempoMarks?.length && !active.syncPoints.length)) return null;
+    return tempoLabels(tl, active.tempoMarks ?? marksFromSyncPoints(tl, active.syncPoints, active.bpm));
+  }, [mode, active?.tempoMarks, active?.syncPoints, active?.bpm, tl, scoreVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // one controller per song + recording; audio files are loaded into it
   useEffect(() => {
@@ -188,7 +196,7 @@ export function PlayerPage() {
           </div>
           {scrollEl && (
             <div ref={pinchZoom.ref} className={cx('mx-auto origin-top px-1 pb-24 md:px-2', compact && 'max-w-[1200px] md:px-6')}>
-              <AlphaTabView data={data.bytes} trackIndex={trackIndex} view={view} zoom={zoom} barsPerRow={barsPerRow} mode={mode} scrollElement={scrollEl} onApi={onApi} onRendered={pinchZoom.onRendered} onError={setError} />
+              <AlphaTabView data={data.bytes} trackIndex={trackIndex} view={view} zoom={zoom} barsPerRow={barsPerRow} mode={mode} tempoLabels={labels} scrollElement={scrollEl} onApi={onApi} onRendered={pinchZoom.onRendered} onError={setError} />
             </div>
           )}
         </main>
