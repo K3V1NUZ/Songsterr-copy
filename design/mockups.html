@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fretline design directions</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, "Segoe UI", Roboto, system-ui, sans-serif; background: #e9e9ec; color: #222; }
+  .picker { position: sticky; top: 0; z-index: 10; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px 16px; background: #1b1d21; color: #fff; }
+  .picker b { margin-right: 8px; font-size: 15px; }
+  .picker button { border: 1px solid #555; background: transparent; color: #ddd; border-radius: 999px; padding: 7px 14px; font: inherit; font-size: 14px; cursor: pointer; }
+  .picker button.on { background: #fff; color: #111; border-color: #fff; }
+  .note { max-width: 1240px; margin: 16px auto 0; padding: 0 16px; font-size: 14px; line-height: 1.5; color: #444; }
+  .note h2 { margin: 0 0 4px; font-size: 20px; color: #111; }
+  .screens { max-width: 1240px; margin: 12px auto 40px; padding: 0 16px; display: grid; gap: 20px; }
+  .label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #777; margin: 4px 0 -12px; }
+  .frame { border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.18); }
+
+  /* ---------- shared structure ---------- */
+  .app { background: var(--bg); color: var(--ink); font-family: var(--font); }
+  .top { height: 56px; display: flex; align-items: center; gap: 14px; padding: 0 18px; background: var(--top); color: var(--top-ink); border-bottom: 1px solid var(--line); }
+  .logo { font-weight: 800; letter-spacing: -.02em; display: flex; align-items: center; gap: 8px; }
+  .logo i { width: 24px; height: 24px; border-radius: var(--r-sm); background: var(--accent); display: inline-block; }
+  .search { flex: 1; max-width: 520px; height: 36px; border-radius: var(--r-pill); background: var(--search); color: var(--muted); display: flex; align-items: center; padding: 0 14px; font-size: 14px; border: 1px solid var(--search-line); }
+  .song-title { margin-left: auto; font-size: 14px; color: var(--top-ink-2); }
+  .song-title b { color: var(--top-ink); }
+  .body { display: grid; grid-template-columns: var(--side-w) 1fr; min-height: 470px; }
+  .side { background: var(--side); border-right: 1px solid var(--line); padding: 12px; }
+  .side h4 { margin: 4px 8px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .track { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: var(--r-sm); margin-bottom: 4px; font-size: 14px; }
+  .track .ic { width: 28px; height: 28px; border-radius: var(--r-sm); display: grid; place-items: center; font-size: 13px; font-weight: 700; background: var(--chip); color: var(--ink-2); }
+  .track small { display: block; color: var(--muted); font-size: 12px; }
+  .track.on { background: var(--sel); color: var(--sel-ink); }
+  .track.on .ic { background: var(--accent); color: var(--on-accent); }
+  .track .ms { margin-left: auto; display: flex; gap: 4px; }
+  .track .ms span { width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--line); display: grid; place-items: center; font-size: 10px; font-weight: 700; color: var(--muted); }
+  .main { padding: 18px 26px 26px; overflow: hidden; }
+  .viewtabs { display: flex; gap: 4px; margin-bottom: 14px; }
+  .viewtabs span { font-size: 13px; padding: 6px 12px; border-radius: var(--r-pill); color: var(--ink-2); }
+  .viewtabs span.on { background: var(--sel); color: var(--sel-ink); font-weight: 600; }
+  .sheet { background: var(--paper); border-radius: var(--r-lg); padding: var(--sheet-pad); border: var(--sheet-border); }
+  .sheet svg { display: block; width: 100%; height: auto; }
+  .sync { font-size: 12px; color: var(--muted); margin: 10px 2px 0; }
+  .sync a { color: var(--accent-ink); }
+  .transport { display: flex; align-items: center; gap: 8px; padding: 10px 18px; background: var(--top); color: var(--top-ink); border-top: 1px solid var(--line); position: relative; flex-wrap: wrap; }
+  .scrub { position: absolute; left: 0; right: 0; top: -2px; height: 4px; background: var(--scrub); }
+  .scrub i { display: block; height: 100%; width: 34%; background: var(--accent); }
+  .play { width: 44px; height: 44px; border-radius: var(--r-play); background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-size: 16px; }
+  .time { font: 13px ui-monospace, Menlo, monospace; color: var(--top-ink-2); margin: 0 10px 0 4px; }
+  .tbtn { height: 34px; padding: 0 12px; border-radius: var(--r-sm); display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--top-ink-2); border: 1px solid transparent; }
+  .tbtn.on { color: var(--accent-ink); background: var(--sel); }
+  .tbtn.box { border-color: var(--line); }
+  .sp { flex: 1; }
+  /* library */
+  .lib { padding: 22px 26px 30px; }
+  .lib h3 { margin: 0 0 14px; font-size: 20px; }
+  .filters { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .filters span { font-size: 13px; padding: 6px 12px; border-radius: var(--r-pill); border: 1px solid var(--line); color: var(--ink-2); }
+  .filters span.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: 1fr auto auto; gap: 16px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .row:last-child { border-bottom: 0; }
+  .row .t { font-weight: 600; } .row .a { color: var(--ink-2); font-size: 13px; }
+  .tags { display: flex; gap: 6px; }
+  .tags span { font-size: 11px; padding: 3px 8px; border-radius: var(--r-pill); background: var(--chip); color: var(--ink-2); }
+  .status { font-size: 12px; color: var(--ok); } .status.warn { color: var(--warn); }
+  .list { background: var(--paper); border-radius: var(--r-lg); border: var(--sheet-border); }
+
+  /* ---------- A: Songsterr-like (airy, white, blue) ---------- */
+  .A { --font: "Helvetica Neue", Arial, sans-serif; --bg: #ffffff; --paper: #ffffff; --ink: #1d1f23; --ink-2: #5d6470; --muted: #9aa1ab;
+       --line: #e6e8eb; --accent: #2f80ed; --accent-ink: #1f6fd8; --on-accent: #fff; --sel: #eef4fe; --sel-ink: #1f6fd8; --chip: #f1f3f5;
+       --top: #ffffff; --top-ink: #1d1f23; --top-ink-2: #5d6470; --search: #f3f4f6; --search-line: transparent; --side: #fafbfc; --scrub: #e6e8eb;
+       --ok: #2e9e5b; --warn: #d98a00; --r-sm: 6px; --r-lg: 0; --r-pill: 6px; --r-play: 50%; --side-w: 230px; --sheet-pad: 0; --sheet-border: 0;
+       --staff: #c9cdd3; --num: #1d1f23; --cursor: #2f80ed; --cursor-bg: rgba(47,128,237,.08); }
+  .A .track.on { box-shadow: inset 3px 0 0 var(--accent); border-radius: 0 6px 6px 0; }
+  /* ---------- B: Studio (dark, DAW-like, coloured tracks) ---------- */
+  .B { --font: Inter, "Segoe UI", sans-serif; --bg: #121417; --paper: #181b1f; --ink: #e9ebee; --ink-2: #a9b0b9; --muted: #6f7782;
+       --line: #262a30; --accent: #f5a524; --accent-ink: #ffc061; --on-accent: #1a1300; --sel: rgba(245,165,36,.12); --sel-ink: #ffc061; --chip: #22262c;
+       --top: #0d0f12; --top-ink: #e9ebee; --top-ink-2: #a9b0b9; --search: #1b1e23; --search-line: #2a2f36; --side: #0f1114; --scrub: #262a30;
+       --ok: #4cc38a; --warn: #f5a524; --r-sm: 4px; --r-lg: 8px; --r-pill: 4px; --r-play: 8px; --side-w: 250px; --sheet-pad: 16px 18px; --sheet-border: 1px solid #23272d;
+       --staff: #3a4048; --num: #f1f3f5; --cursor: #f5a524; --cursor-bg: rgba(245,165,36,.10); }
+  .B .track { border-left: 3px solid var(--tc, #555); border-radius: 4px; background: #15181c; }
+  .B .track.on { background: #1d2126; }
+  .B .track .ic { background: transparent; color: var(--tc); border: 1px solid var(--tc); }
+  .B .track.on .ic { background: var(--tc); color: #111; }
+  .B .meter { display: block; height: 3px; margin-top: 6px; border-radius: 2px; background: linear-gradient(90deg, var(--tc) var(--lvl, 60%), #2a2f36 0); }
+  .B .time { color: var(--accent-ink); }
+  /* ---------- C: Warm minimal (paper, rounded, muted teal) ---------- */
+  .C { --font: Inter, "Segoe UI", sans-serif; --bg: #f5f2ec; --paper: #fffdf9; --ink: #2a2723; --ink-2: #6b645b; --muted: #a39b90;
+       --line: #e7e1d7; --accent: #2f7d76; --accent-ink: #256660; --on-accent: #fff; --sel: #e4efec; --sel-ink: #256660; --chip: #efe9df;
+       --top: #fbf9f5; --top-ink: #2a2723; --top-ink-2: #6b645b; --search: #f0ebe3; --search-line: transparent; --side: #f5f2ec; --scrub: #e7e1d7;
+       --ok: #3c8a5a; --warn: #b9772a; --r-sm: 10px; --r-lg: 18px; --r-pill: 999px; --r-play: 50%; --side-w: 240px; --sheet-pad: 18px 22px; --sheet-border: 1px solid #ece6dc;
+       --staff: #d5cdc1; --num: #2a2723; --cursor: #2f7d76; --cursor-bg: rgba(47,125,118,.09); }
+  .C .sheet { box-shadow: 0 2px 10px rgba(80,60,30,.06); }
+  .C .transport { margin: 0 14px 14px; border-radius: 18px; border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(80,60,30,.08); }
+  .C .scrub { left: 18px; right: 18px; top: -2px; border-radius: 4px; overflow: hidden; }
+  .C .tbtn.on { border-radius: 999px; }
+  .theme { display: none; } .theme.show { display: grid; }
+</style>
+</head>
+<body>
+<div class="picker">
+  <b>Fretline design directions</b>
+  <button data-t="A" class="on">A · Songsterr-like</button>
+  <button data-t="B">B · Studio</button>
+  <button data-t="C">C · Warm minimal</button>
+</div>
+
+<div id="root"></div>
+
+<script>
+// Tab content: the first 8 bars of the Greensleeves sample (traditional tune, our own arrangement).
+// Each beat: [quarters, [[string, fret], ...]]  — string 1 = high e.
+const BARS = [
+  [[2, []], [1, [[3, 2]]]],
+  [[2, [[2, 1]]], [1, [[2, 3]]]],
+  [[1.5, [[1, 0]]], [0.5, [[1, 1]]], [1, [[1, 0]]]],
+  [[2, [[2, 3]]], [1, [[2, 0]]]],
+  [[1.5, [[3, 0]]], [0.5, [[3, 2]]], [1, [[2, 0]]]],
+  [[2, [[2, 1]]], [1, [[3, 2]]]],
+  [[1.5, [[3, 2]]], [0.5, [[3, 1]]], [1, [[3, 2]]]],
+  [[2, [[2, 0]]], [1, [[3, 1]]]],
+];
+const TRACKS = [
+  ['Melody', 'guitar · standard', 'G', '#5aa9ff', 70],
+  ['Rhythm', 'guitar · standard', 'G', '#b58cff', 55],
+  ['Bass', 'bass · standard', 'B', '#4cc38a', 80],
+  ['Recording', 'audio · stem-free mix', '♪', '#f5a524', 90],
+];
+const SONGS = [
+  ['Greensleeves', 'Traditional', ['folk', 'fingerstyle'], 'Synced 91 %', ''],
+  ['Demo Riff', 'Fretline', ['rock', 'drop D'], 'Synced by hand', ''],
+  ['Scarborough Fair', 'Traditional', ['folk', 'capo 2'], 'Sync looks off', 'warn'],
+  ['Rehearsal Jam #3', 'The Basement Band', ['band', 'live'], 'Not synced', 'warn'],
+];
+
+function tabSvg(cursorBar, cursorPos) {
+  const W = 1000, gap = 12, top = 30, left = 34, per = 8 * 5 / 2; // two rows of 4 bars
+  let s = `<svg viewBox="0 0 ${W} 260" xmlns="http://www.w3.org/2000/svg" font-family="var(--font)">`;
+  for (let row = 0; row < 2; row++) {
+    const y0 = top + row * 120, bw = (W - left - 10) / 4;
+    // current bar highlight + cursor
+    if (Math.floor(cursorBar / 4) === row) {
+      const bx = left + (cursorBar % 4) * bw;
+      s += `<rect x="${bx}" y="${y0 - 18}" width="${bw}" height="${gap * 5 + 46}" fill="var(--cursor-bg)" rx="4"/>`;
+    }
+    for (let i = 0; i < 6; i++) s += `<line x1="${left}" x2="${W - 10}" y1="${y0 + i * gap}" y2="${y0 + i * gap}" stroke="var(--staff)" stroke-width="1"/>`;
+    if (row === 0) ['e', 'B', 'G', 'D', 'A', 'E'].forEach((n, i) => { s += `<text x="${left - 14}" y="${y0 + i * gap + 4}" font-size="10" fill="var(--muted)">${n}</text>`; });
+    for (let b = 0; b < 4; b++) {
+      const bi = row * 4 + b, bx = left + b * bw;
+      s += `<line x1="${bx}" x2="${bx}" y1="${y0}" y2="${y0 + 5 * gap}" stroke="var(--staff)" stroke-width="1.2"/>`;
+      s += `<text x="${bx + 3}" y="${y0 - 6}" font-size="10" fill="var(--muted)">${bi + 1}</text>`;
+      let pos = 0;
+      for (const [q, notes] of BARS[bi]) {
+        const x = bx + 22 + (pos / 3) * (bw - 30);
+        for (const [str, fret] of notes) {
+          const y = y0 + (str - 1) * gap;
+          s += `<rect x="${x - 6}" y="${y - 7}" width="12" height="14" fill="var(--paper)"/>`;
+          s += `<text x="${x}" y="${y + 4}" font-size="13" font-weight="600" text-anchor="middle" fill="var(--num)">${fret}</text>`;
+        }
+        // rhythm stem
+        if (notes.length) s += `<line x1="${x}" x2="${x}" y1="${y0 + 5 * gap + 10}" y2="${y0 + 5 * gap + (q >= 2 ? 22 : 30)}" stroke="var(--ink-2)" stroke-width="1.2"/>`;
+        if (q === 0.5) s += `<path d="M${x},${y0 + 5 * gap + 30} q6,-2 7,-9" stroke="var(--ink-2)" fill="none" stroke-width="1.2"/>`;
+        if (q === 1.5) s += `<circle cx="${x + 5}" cy="${y0 + 5 * gap + 27}" r="1.6" fill="var(--ink-2)"/>`;
+        pos += q;
+      }
+      if (b === 3) s += `<line x1="${W - 10}" x2="${W - 10}" y1="${y0}" y2="${y0 + 5 * gap}" stroke="var(--staff)" stroke-width="1.2"/>`;
+    }
+    if (Math.floor(cursorBar / 4) === row) {
+      const cx = left + (cursorBar % 4) * bw + 22 + (cursorPos / 3) * (bw - 30);
+      s += `<rect x="${cx - 1.5}" y="${y0 - 16}" width="3" height="${gap * 5 + 42}" rx="1.5" fill="var(--cursor)"/>`;
+    }
+  }
+  return s + '</svg>';
+}
+
+function player(t) {
+  const tracks = TRACKS.map(([n, d, ic, c, lvl], i) => `
+    <div class="track ${i === 0 ? 'on' : ''}" style="--tc:${c};--lvl:${lvl}%">
+      <span class="ic">${ic}</span><span>${n}<small>${d}</small>${t === 'B' ? '<span class="meter"></span>' : ''}</span>
+      <span class="ms"><span>S</span><span>M</span></span>
+    </div>`).join('');
+  return `
+  <div class="app ${t}">
+    <div class="top"><span class="logo"><i></i>Fretline</span><span class="search">Search your library…</span>
+      <span class="song-title"><b>Greensleeves</b> · Traditional</span></div>
+    <div class="body">
+      <div class="side"><h4>Instruments</h4>${tracks}</div>
+      <div class="main">
+        <div class="viewtabs"><span class="on">Tab</span><span>Tab + notation</span><span>Notation</span></div>
+        <div class="sheet">${tabSvg(2, 1.6)}</div>
+        <p class="sync">Synced automatically (91 %) · <a>Sync looks off? Fix it</a></p>
+      </div>
+    </div>
+    <div class="transport"><div class="scrub"><i></i></div>
+      <span class="tbtn">⏮</span><span class="play">❚❚</span><span class="time">0:21 / 1:03</span>
+      <span class="tbtn box">Speed 85 %</span><span class="tbtn on">Loop 3–4 · ×2</span><span class="tbtn on">Metronome</span><span class="tbtn">Count-in 1 bar</span>
+      <span class="sp"></span><span class="tbtn">Sync</span><span class="tbtn box">Mixer</span>
+    </div>
+  </div>`;
+}
+
+function library(t) {
+  const rows = SONGS.map(([title, artist, tags, st, cls]) => `
+    <div class="row"><div><div class="t">${title}</div><div class="a">${artist} · Melody, Rhythm, Bass</div></div>
+      <div class="tags">${tags.map((x) => `<span>${x}</span>`).join('')}</div><div class="status ${cls}">${st}</div></div>`).join('');
+  return `
+  <div class="app ${t}">
+    <div class="top"><span class="logo"><i></i>Fretline</span><span class="search">Search title, artist, tag, instrument…</span><span class="song-title">+ Add song</span></div>
+    <div class="lib"><h3>Your library</h3>
+      <div class="filters"><span class="on">All</span><span>Guitar</span><span>Bass</span><span>Needs sync</span><span>Recent ▾</span></div>
+      <div class="list">${rows}</div>
+    </div>
+  </div>`;
+}
+
+const NOTES = {
+  A: ['A · Songsterr-like', 'Light and airy: a lot of white, thin grey lines and a blue accent, with almost no visible chrome. The tab sits directly on the page, and the selected instrument gets a blue edge. Feels like a familiar online tab site.'],
+  B: ['B · Studio', 'Dark-first, like a DAW (audio workstation): each part has its own colour with a small level meter, the tab sits on a slightly lighter panel with high-contrast numbers, and amber is the accent. Good for evening practice and for the mixer-heavy band workflow. A matching light mode would be added.'],
+  C: ['C · Warm minimal', 'Soft paper tones, rounded cards and a floating transport bar, with roomy spacing and one muted teal accent. Calm and friendly; close to the earlier Fretline look, but tidier.'],
+};
+
+function render(t) {
+  document.querySelectorAll('.picker button').forEach((b) => b.classList.toggle('on', b.dataset.t === t));
+  const [h, p] = NOTES[t];
+  document.getElementById('root').innerHTML = `
+    <div class="note"><h2>${h}</h2>${p}</div>
+    <div class="screens">
+      <div class="label">Player</div><div class="frame">${player(t)}</div>
+      <div class="label">Library</div><div class="frame">${library(t)}</div>
+    </div>`;
+}
+document.querySelectorAll('.picker button').forEach((b) => b.addEventListener('click', () => render(b.dataset.t)));
+render('A');
+</script>
+</body>
+</html>
