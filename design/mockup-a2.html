@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fretline A2 mockup</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1c1d1f; --ink2: #5f646b; --muted: #9a9fa6; --line: #e4e5e7; --hover: #f4f5f6;
+    --accent: #1f6fe5; --staff: #c4c7cc; --cur-bar: rgba(31, 111, 229, .06);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .app { height: 100vh; display: grid; grid-template-rows: 48px 1fr 56px; }
+  svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+  /* top bar */
+  .top { display: flex; align-items: center; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 700; letter-spacing: -.01em; width: 208px; }
+  .search { display: flex; align-items: center; gap: 8px; width: 360px; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
+  .search.active { border-color: var(--accent); color: var(--ink); }
+  .now { color: var(--ink2); } .now b { color: var(--ink); font-weight: 600; }
+  .top .right { margin-left: auto; display: flex; gap: 2px; }
+  .ib { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 4px; color: var(--ink2); }
+  .ib:hover { background: var(--hover); }
+  .ib.on { color: var(--accent); }
+
+  /* middle */
+  .mid { display: grid; grid-template-columns: 224px 1fr auto; min-height: 0; }
+  .tracks { border-right: 1px solid var(--line); overflow: auto; padding: 8px 0; }
+  .tr { display: flex; align-items: center; gap: 10px; padding: 9px 16px; color: var(--ink2); border-left: 2px solid transparent; }
+  .tr > div:not(.ms) { min-width: 0; }
+  .tr .n { color: var(--ink); } .tr small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tr.on { border-left-color: var(--accent); background: var(--hover); }
+  .tr.on .n { font-weight: 600; } .tr.on svg { color: var(--accent); }
+  .tr .ms { margin-left: auto; display: none; gap: 2px; font-size: 11px; color: var(--muted); }
+  .tr:hover .ms, .tr.on .ms { display: flex; }
+  .tr .ms span { width: 20px; text-align: center; }
+  .tabarea { overflow: auto; min-width: 0; }
+  .sheet { max-width: 1120px; margin: 0 auto; padding: 28px 40px 80px; }
+  .head h1 { margin: 0; font-size: 22px; font-weight: 600; }
+  .head p { margin: 2px 0 0; color: var(--ink2); }
+  .head .meta { margin: 10px 0 22px; color: var(--muted); font-size: 12px; display: flex; gap: 18px; }
+  .head .meta a { color: var(--accent); text-decoration: none; }
+
+  /* right panel */
+  .panel { width: 300px; border-left: 1px solid var(--line); overflow: auto; }
+  .panel h3 { margin: 0; padding: 14px 16px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+  .ch { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .ch .row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .ch .row .ms { margin-left: auto; display: flex; gap: 4px; font-size: 11px; color: var(--muted); }
+  .ch .row .ms span { width: 22px; height: 20px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 3px; }
+  .ch .row .ms span.on { color: var(--accent); border-color: var(--accent); }
+  .slider { height: 4px; background: var(--line); border-radius: 2px; position: relative; }
+  .slider i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink2); border-radius: 2px; }
+  .slider b { position: absolute; top: -5px; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 1px solid var(--staff); }
+  .ch small { color: var(--muted); font-size: 12px; }
+
+  /* library panel (over the left side) */
+  .lib { position: absolute; top: 48px; left: 0; bottom: 56px; width: 520px; background: #fff; border-right: 1px solid var(--line); box-shadow: 8px 0 24px rgba(0,0,0,.06); display: flex; flex-direction: column; }
+  .lib .bar { display: flex; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); color: var(--ink2); font-size: 13px; }
+  .lib .bar span.on { color: var(--ink); font-weight: 600; }
+  .lib .bar .sort { margin-left: auto; color: var(--muted); }
+  .song { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  .song .t { font-weight: 600; } .song .a { color: var(--ink2); }
+  .song .d { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+  .song .s { font-size: 12px; color: var(--muted); text-align: right; }
+  .song .s.warn { color: #b36b00; }
+  .song.sel { background: var(--hover); }
+  .lib .foot { margin-top: auto; padding: 12px 16px; border-top: 1px solid var(--line); color: var(--accent); display: flex; gap: 8px; align-items: center; }
+
+  /* bottom bar */
+  .bottom { position: relative; display: flex; align-items: center; gap: 4px; padding: 0 12px; border-top: 1px solid var(--line); }
+  .progress { position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--line); }
+  .progress i { display: block; height: 100%; width: 34%; background: var(--accent); }
+  .progress u { position: absolute; top: 0; height: 2px; left: 9%; width: 6%; background: #f0a000; }
+  .play { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: #fff; margin: 0 6px; }
+  .play svg { stroke: none; fill: currentColor; }
+  .time { font: 12px ui-monospace, Menlo, monospace; color: var(--ink2); margin: 0 14px 0 6px; white-space: nowrap; }
+  .sep { width: 1px; height: 22px; background: var(--line); margin: 0 8px; }
+  .txt { height: 34px; padding: 0 8px; display: flex; align-items: center; gap: 6px; color: var(--ink2); border-radius: 4px; white-space: nowrap; }
+  .txt.on { color: var(--accent); }
+  .txt .v { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .grow { flex: 1; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .seg span { padding: 5px 10px; font-size: 12px; color: var(--ink2); }
+  .seg span.on { background: var(--hover); color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script>
+const I = {
+  search: '<circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', gear: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>',
+  guitar: '<path d="M14 10 20 4M18 2l4 4M10.5 13.5a3 3 0 1 0 0 .01"/><path d="M14 10c-1-1-3-1-4 0l-.5.5c-2-.5-4 0-5.5 1.5-2 2-2 5 0 7s5 2 7 0c1.5-1.5 2-3.5 1.5-5.5l.5-.5c1-1 1-3 0-4z"/>',
+  bass: '<path d="M15 9 21 3M19 1l4 4"/><path d="M15 9c-1.2-1.2-3-1.2-4.2 0l-.6.6c-2.2-.6-4.4 0-6 1.6-2.4 2.4-2.4 5.6 0 8s5.6 2.4 8 0c1.6-1.6 2.2-3.8 1.6-6l.6-.6c1.2-1.2 1.2-3 0-4.2z"/>',
+  wave: '<path d="M3 12h2l2-6 3 12 3-9 2 5 2-2h4"/>',
+  prev: '<path d="M6 5v14M18 6l-9 6 9 6z"/>', loop: '<path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/>',
+  metro: '<path d="M9 3h6l4 18H5z"/><path d="M12 15l5-8"/>', mixer: '<path d="M6 4v16M12 4v16M18 4v16"/><path d="M4 9h4M10 15h4M16 7h4"/>',
+  sync: '<path d="M3 12h4l3-7 4 14 3-7h4"/>', zoomIn: '<circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5M8 11h6M11 8v6"/>', zoomOut: '<circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5M8 11h6"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>', count: '<path d="M4 18h3M9 18h3M14 18h3M19 18h1"/><path d="M5 6v8M10 9v5M15 12v2"/>',
+};
+const icon = (n) => `<svg class="i" viewBox="0 0 24 24">${I[n]}</svg>`;
+
+// Greensleeves sample (traditional tune, our own arrangement): [quarters, [[string, fret]...]]
+const BARS = [
+  [[2, []], [1, [[3, 2]]]], [[2, [[2, 1]]], [1, [[2, 3]]]], [[1.5, [[1, 0]]], [0.5, [[1, 1]]], [1, [[1, 0]]]], [[2, [[2, 3]]], [1, [[2, 0]]]],
+  [[1.5, [[3, 0]]], [0.5, [[3, 2]]], [1, [[2, 0]]]], [[2, [[2, 1]]], [1, [[3, 2]]]], [[1.5, [[3, 2]]], [0.5, [[3, 1]]], [1, [[3, 2]]]], [[2, [[2, 0]]], [1, [[3, 1]]]],
+  [[2, [[4, 2]]], [1, [[3, 2]]]], [[2, [[2, 1]]], [1, [[2, 3]]]], [[1.5, [[1, 0]]], [0.5, [[1, 1]]], [1, [[1, 0]]]], [[2, [[2, 3]]], [1, [[2, 0]]]],
+  [[1.5, [[3, 0]]], [0.5, [[3, 2]]], [1, [[2, 0]]]], [[1.5, [[2, 1]]], [0.5, [[2, 0]]], [1, [[3, 2]]]], [[1.5, [[3, 1]]], [0.5, [[4, 4]]], [1, [[3, 1]]]], [[3, [[3, 2]]]],
+  [[3, [[1, 3]]]], [[1.5, [[1, 3]]], [0.5, [[1, 2]]], [1, [[1, 0]]]], [[2, [[2, 3]]], [1, [[2, 0]]]], [[1.5, [[3, 0]]], [0.5, [[3, 2]]], [1, [[2, 0]]]],
+];
+function tab(cursorBar, cursorPos) {
+  const W = 1040, gap = 13, rowH = 150, perRow = 4, rows = Math.ceil(BARS.length / perRow), left = 30;
+  let s = `<svg viewBox="0 0 ${W} ${rows * rowH}" width="100%">`;
+  for (let r = 0; r < rows; r++) {
+    const y0 = 34 + r * rowH, bw = (W - left - 4) / perRow;
+    const cr = Math.floor(cursorBar / perRow);
+    if (cr === r) s += `<rect x="${left + (cursorBar % perRow) * bw}" y="${y0 - 22}" width="${bw}" height="${5 * gap + 64}" fill="var(--cur-bar)"/>`;
+    for (let i = 0; i < 6; i++) s += `<line x1="${left}" x2="${W - 4}" y1="${y0 + i * gap}" y2="${y0 + i * gap}" stroke="var(--staff)"/>`;
+    if (r === 0) ['e', 'B', 'G', 'D', 'A', 'E'].forEach((n, i) => { s += `<text x="${left - 16}" y="${y0 + i * gap + 4}" font-size="10" fill="#9a9fa6">${n}</text>`; });
+    for (let b = 0; b < perRow; b++) {
+      const bi = r * perRow + b; if (!BARS[bi]) break;
+      const bx = left + b * bw;
+      s += `<line x1="${bx}" x2="${bx}" y1="${y0}" y2="${y0 + 5 * gap}" stroke="#8d9198"/>`;
+      s += `<text x="${bx + 3}" y="${y0 - 7}" font-size="10" fill="#9a9fa6">${bi + 1}</text>`;
+      if (bi === 0) s += `<text x="${bx + 3}" y="${y0 - 22}" font-size="11" font-weight="600" fill="#5f646b">Verse</text>`;
+      if (bi === 16) s += `<text x="${bx + 3}" y="${y0 - 22}" font-size="11" font-weight="600" fill="#5f646b">Chorus</text>`;
+      let pos = 0;
+      for (const [q, notes] of BARS[bi]) {
+        const x = bx + 26 + (pos / 3) * (bw - 40);
+        for (const [str, fret] of notes) {
+          const y = y0 + (str - 1) * gap;
+          s += `<rect x="${x - 6}" y="${y - 7}" width="12" height="14" fill="#fff"/>`;
+          s += `<text x="${x}" y="${y + 4.5}" font-size="13" text-anchor="middle" fill="${bi === cursorBar && pos <= cursorPos && cursorPos < pos + q ? 'var(--accent)' : '#1c1d1f'}">${fret}</text>`;
+        }
+        if (notes.length) {
+          s += `<line x1="${x}" x2="${x}" y1="${y0 + 5 * gap + 12}" y2="${y0 + 5 * gap + (q >= 2 ? 24 : 34)}" stroke="#5f646b" stroke-width="1.1"/>`;
+          if (q === 0.5) s += `<path d="M${x},${y0 + 5 * gap + 34} q6,-2 7,-9" stroke="#5f646b" fill="none" stroke-width="1.1"/>`;
+          if (q === 1.5) s += `<circle cx="${x + 5}" cy="${y0 + 5 * gap + 31}" r="1.5" fill="#5f646b"/>`;
+        } else s += `<rect x="${x - 5}" y="${y0 + 5 * gap + 18}" width="10" height="3.5" fill="#5f646b"/>`;
+        pos += q;
+      }
+      if (b === perRow - 1) s += `<line x1="${W - 4}" x2="${W - 4}" y1="${y0}" y2="${y0 + 5 * gap}" stroke="#8d9198"/>`;
+    }
+    if (cr === r) {
+      const cx = left + (cursorBar % perRow) * bw + 26 + (cursorPos / 3) * (bw - 40);
+      s += `<line x1="${cx}" x2="${cx}" y1="${y0 - 20}" y2="${y0 + 5 * gap + 40}" stroke="var(--accent)" stroke-width="2"/>`;
+    }
+  }
+  return s + '</svg>';
+}
+
+const TRACKS = [['guitar', 'Melody', 'Acoustic guitar · E A D G B E'], ['guitar', 'Rhythm', 'Acoustic guitar · E A D G B E'], ['bass', 'Bass', 'Bass · E A D G'], ['wave', 'Recording', 'MP3 · 1:03']];
+const SONGS = [
+  ['Greensleeves', 'Traditional', 'Melody, Rhythm, Bass · standard tuning', 'synced'],
+  ['Demo Riff', 'Fretline', 'Rhythm, Lead, Bass, Drums · drop D', 'synced'],
+  ['Scarborough Fair', 'Traditional', 'Guitar · capo 2', 'check sync'],
+  ['Rehearsal Jam #3', 'The Basement Band', 'Guitar 1, Guitar 2, Bass, Drums', 'not synced'],
+  ['Wildwood Flower', 'Traditional', 'Guitar · standard tuning', 'synced'],
+];
+
+function render(state) {
+  const top = `
+    <div class="top">
+      <div class="brand">Fretline</div>
+      <div class="search ${state === 'library' ? 'active' : ''}">${icon('search')}<span>${state === 'library' ? 'tr' : 'Search your songs'}</span></div>
+      <div class="now"><b>Greensleeves</b> — Traditional</div>
+      <div class="right"><span class="ib" title="Add song">${icon('plus')}</span><span class="ib" title="Settings">${icon('gear')}</span></div>
+    </div>`;
+  const tracks = `<div class="tracks">${TRACKS.map(([ic, n, d], i) => `
+      <div class="tr ${i === 0 ? 'on' : ''}">${icon(ic)}<div><div class="n">${n}</div><small>${d}</small></div><div class="ms"><span>S</span><span>M</span></div></div>`).join('')}</div>`;
+  const sheet = `<div class="tabarea"><div class="sheet">
+      <div class="head"><h1>Greensleeves</h1><p>Traditional</p>
+        <div class="meta"><span>♩ = 100</span><span>3/4</span><span>Melody · standard tuning</span><span>Synced automatically · <a href="#">fix sync</a></span></div></div>
+      ${tab(2, 1.6)}</div></div>`;
+  const mixer = state === 'mixer' ? `<div class="panel"><h3>Mixer <span class="ib" style="width:20px;height:20px">${icon('close')}</span></h3>
+      ${[['Recording', 1, 0.9, ''], ['Bass stem', 0, 0.75, 'linked to Bass'], ['Metronome', 0, 0.6, ''], ['Count-in', 0, 0.6, 'uses the metronome sound']].map(([n, solo, v, note]) => `
+      <div class="ch"><div class="row"><span>${n}</span><div class="ms"><span class="${solo ? 'on' : ''}">S</span><span>M</span></div></div>
+        <div class="slider"><i style="width:${v * 100}%"></i><b style="left:calc(${v * 100}% - 7px)"></b></div>${note ? `<small>${note}</small>` : ''}</div>`).join('')}
+    </div>` : '';
+  const lib = state === 'library' ? `<div class="lib">
+      <div class="bar"><span class="on">All songs</span><span>Guitar</span><span>Bass</span><span>Needs sync</span><span class="sort">Recently played ▾</span></div>
+      ${SONGS.filter((s) => /tr/i.test(s[0] + s[1])).map(([t, a, d, st], i) => `
+        <div class="song ${i === 0 ? 'sel' : ''}"><div><span class="t">${t}</span> <span class="a">— ${a}</span></div><div class="s ${st !== 'synced' ? 'warn' : ''}">${st}</div><div class="d">${d}</div></div>`).join('')}
+      <div class="foot">${icon('plus')} Add a song (score + recording)</div></div>` : '';
+  const bottom = `
+    <div class="bottom"><div class="progress"><i></i><u></u></div>
+      <span class="ib" title="Back to start">${icon('prev')}</span>
+      <span class="play"><svg class="i" viewBox="0 0 24 24"><path d="M7 5h3v14H7zM14 5h3v14h-3z"/></svg></span>
+      <span class="time">0:21 / 1:03 · bar 3</span>
+      <span class="txt" title="Speed">Speed <span class="v">85%</span></span>
+      <span class="txt on" title="Loop">${icon('loop')} 3–4</span>
+      <span class="txt on" title="Metronome">${icon('metro')}</span>
+      <span class="txt" title="Count-in">${icon('count')} 1 bar</span>
+      <span class="grow"></span>
+      <div class="seg"><span class="on">Tab</span><span>Tab + notes</span><span>Notes</span></div>
+      <span class="sep"></span>
+      <span class="ib" title="Smaller">${icon('zoomOut')}</span><span class="ib" title="Bigger">${icon('zoomIn')}</span>
+      <span class="sep"></span>
+      <span class="ib" title="Sync">${icon('sync')}</span>
+      <span class="ib ${state === 'mixer' ? 'on' : ''}" title="Mixer">${icon('mixer')}</span>
+    </div>`;
+  document.getElementById('app').innerHTML = top + `<div class="mid" style="position:relative">${tracks}${sheet}${mixer}${lib}</div>` + bottom;
+}
+render(new URLSearchParams(location.search).get('state') || 'player');
+</script>
+</body>
+</html>
