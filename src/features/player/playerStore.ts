@@ -24,6 +24,8 @@ interface PlayerState {
   trainer: SpeedTrainer;
   channels: Record<string, ChannelState>;
   error: string;
+  /** Bumped whenever the controller has (re)built the score timeline. */
+  scoreVersion: number;
   reset: (mode: AudioMode) => void;
   setChannel: (id: string, patch: Partial<ChannelState>) => void;
 }
@@ -42,12 +44,13 @@ const initial = {
   trainer: { enabled: false, step: 0.05, everyLoops: 2, target: 1 },
   channels: {},
   error: '',
+  scoreVersion: 0,
 };
 
 export const usePlayer = create<PlayerState>()((set) => ({
   mode: 'synth',
   ...initial,
-  reset: (mode) => set({ mode, ...initial }),
+  reset: (mode) => set((s) => ({ mode, ...initial, scoreVersion: s.scoreVersion })),
   setChannel: (id, patch) =>
     set((s) => ({ channels: { ...s.channels, [id]: { volume: id === 'metronome' ? 0.7 : 1, muted: false, solo: false, ...s.channels[id], ...patch } } })),
 }));

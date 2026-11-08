@@ -94,6 +94,7 @@ export class PlayerController {
     this.timeline = buildTimeline(scoreTimingFromAlphaTab(score));
     this.syncMap = createSyncMap(this.timeline, this.syncPoints);
     this.updateClicks();
+    usePlayer.setState((s) => ({ scoreVersion: s.scoreVersion + 1 }));
     if (this.engine) usePlayer.setState({ durationMs: Math.max(this.engine.durationMs, 0), ready: this.engine.hasAudio });
   }
 

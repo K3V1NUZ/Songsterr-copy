@@ -13,6 +13,7 @@ import { PlayerController } from './PlayerController';
 import { TransportBar } from './TransportBar';
 import { usePlayer } from './playerStore';
 import { useShortcuts } from './useShortcuts';
+import { SyncPanel } from '@/features/sync/SyncPanel';
 
 export function PlayerPage() {
   const { id = '' } = useParams();
@@ -25,6 +26,8 @@ export function PlayerPage() {
   const [controller, setController] = useState<PlayerController>();
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
   const [mixerOpen, setMixerOpen] = useState(false);
+  const [sync, setSync] = useState<{ open: boolean; autoRun: boolean }>({ open: false, autoRun: false });
+  const [recording, setRecording] = useState<Blob | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const pickFor = useRef<'recording' | 'stem'>('recording');
   const playerError = usePlayer((s) => s.error);
@@ -57,8 +60,9 @@ export function PlayerPage() {
     (async () => {
       if (song.audioFileId) {
         const f = await repo.getFile(song.audioFileId);
+        setRecording(f?.blob ?? null);
         if (f?.blob) await c.setRecording(f.blob);
-      }
+      } else setRecording(null);
       for (const st of song.stems) {
         const f = await repo.getFile(st.fileId);
         if (f?.blob) await c.addStem(st.id, f.blob);
@@ -128,6 +132,8 @@ export function PlayerPage() {
     const stored = await repo.putFile({ kind: kind === 'recording' ? 'audio' : 'stem', name: file.name, blob: file });
     if (kind === 'recording') {
       setSong(await repo.updateSong(song.id, { audioFileId: stored.id }));
+      // a new recording: sync it automatically (the tool stays open only if it's unsure)
+      setSync({ open: true, autoRun: true });
     } else {
       const part = song.parts.find((p) => p.trackIndex === trackIndex);
       const stem = { id: newId(), name: file.name.replace(/\.[^.]+$/, ''), fileId: stored.id, ...(part ? { partId: part.id } : {}) };
@@ -168,6 +174,14 @@ export function PlayerPage() {
             <button type="button" className="h-8 w-8 rounded-control text-ink-2 hover:bg-surface-2" onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))} aria-label="Bigger">+</button>
           </div>
           {playerError && <p className="px-4 py-2 text-sm text-danger">{playerError}</p>}
+          {mode === 'media' && !sync.open && (
+            <p className="px-4 pt-2 text-xs text-muted">
+              {song.syncSource === 'auto' ? `Synced automatically (${Math.round((song.syncConfidence ?? 0) * 100)} %). ` : song.syncSource === 'manual' ? 'Synced by hand. ' : 'Not synced yet. '}
+              <button type="button" className="text-accent-ink underline" onClick={() => setSync({ open: true, autoRun: song.syncSource === 'none' })}>
+                {song.syncSource === 'none' ? 'Sync it' : 'Sync looks off? Fix it'}
+              </button>
+            </p>
+          )}
           {scrollEl && (
             <AlphaTabView data={data} trackIndex={trackIndex} view={view} zoom={zoom} mode={mode} scrollElement={scrollEl} onApi={onApi} onError={setError} />
           )}
@@ -182,7 +196,14 @@ export function PlayerPage() {
           </aside>
         )}
       </div>
-      <TransportBar controller={controller} mixerOpen={mixerOpen} onToggleMixer={() => setMixerOpen((o) => !o)} />
+      {sync.open && mode === 'media' && (
+        <SyncPanel song={song} controller={controller} recording={recording} autoRun={sync.autoRun}
+          onSongChange={(s) => setSong(s)}
+          onAutoDone={(confidence) => { if (confidence >= 0.6 && sync.autoRun) setSync({ open: false, autoRun: false }); }}
+          onClose={() => setSync({ open: false, autoRun: false })} />
+      )}
+      <TransportBar controller={controller} mixerOpen={mixerOpen} onToggleMixer={() => setMixerOpen((o) => !o)}
+        syncOpen={sync.open} onToggleSync={mode === 'media' ? () => setSync((s) => ({ open: !s.open, autoRun: false })) : undefined} />
       <input ref={fileInput} type="file" accept="audio/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void onPickFile(f); e.target.value = ''; }} />
     </div>
   );

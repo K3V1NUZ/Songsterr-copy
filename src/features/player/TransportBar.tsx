@@ -12,7 +12,16 @@ export const fmtTime = (ms: number) => {
 
 const SPEEDS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5];
 
-export function TransportBar({ controller, onToggleMixer, mixerOpen }: { controller: PlayerController; onToggleMixer: () => void; mixerOpen: boolean }) {
+interface Props {
+  controller: PlayerController;
+  mixerOpen: boolean;
+  onToggleMixer: () => void;
+  syncOpen?: boolean;
+  /** Only in recording mode. */
+  onToggleSync?: () => void;
+}
+
+export function TransportBar({ controller, onToggleMixer, mixerOpen, syncOpen, onToggleSync }: Props) {
   const p = usePlayer();
   const [trainerOpen, setTrainerOpen] = useState(false);
   const playing = p.state === 'playing' || p.state === 'counting-in';
@@ -80,6 +89,7 @@ export function TransportBar({ controller, onToggleMixer, mixerOpen }: { control
           </select>
         </label>
         <span className="flex-1" />
+        {onToggleSync && <Button variant="ghost" active={syncOpen} onClick={onToggleSync}>Sync</Button>}
         <Button variant="ghost" active={mixerOpen} onClick={onToggleMixer}>Mixer</Button>
       </div>
     </footer>
