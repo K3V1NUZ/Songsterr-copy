@@ -1,13 +1,21 @@
-// Renders a score with alphaTab. Playback is added in phase 2 (external-media mode
-// driven by our own Web Audio engine).
+// Renders a score with alphaTab and exposes the API (cursor, selection, player).
+// In 'media' mode alphaTab is driven by our Web Audio engine (external media);
+// in 'synth' mode alphaTab plays the score itself (no recording attached).
 import { useEffect, useRef } from 'react';
-import { AlphaTabApi, LayoutMode, model, Settings, StaveProfile } from '@coderline/alphatab';
+import { AlphaTabApi, LayoutMode, model, PlayerMode, ScrollMode, Settings, StaveProfile } from '@coderline/alphatab';
+
+export type ScoreView = 'tab' | 'tab+score' | 'score';
+export type AudioMode = 'media' | 'synth';
 
 export interface AlphaTabViewProps {
   data: Uint8Array;
   trackIndex: number;
-  view: 'tab' | 'tab+score' | 'score';
+  view: ScoreView;
   zoom: number;
+  mode: AudioMode;
+  /** Element alphaTab scrolls to keep the cursor visible. */
+  scrollElement?: HTMLElement | null;
+  onApi?: (api: AlphaTabApi | null) => void;
   onScoreLoaded?: (score: model.Score) => void;
   onError?: (message: string) => void;
 }
@@ -26,42 +34,54 @@ function applyThemeColors(settings: Settings): void {
 }
 
 const PROFILE = { tab: StaveProfile.Tab, 'tab+score': StaveProfile.ScoreTab, score: StaveProfile.Score } as const;
+const PLAYER_MODE = { media: PlayerMode.EnabledExternalMedia, synth: PlayerMode.EnabledSynthesizer } as const;
 
-export function AlphaTabView({ data, trackIndex, view, zoom, onScoreLoaded, onError }: AlphaTabViewProps) {
+export function AlphaTabView({ data, trackIndex, view, zoom, mode, scrollElement, onApi, onScoreLoaded, onError }: AlphaTabViewProps) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<AlphaTabApi | null>(null);
-  const callbacks = useRef({ onScoreLoaded, onError });
-  callbacks.current = { onScoreLoaded, onError };
+  const callbacks = useRef({ onApi, onScoreLoaded, onError });
+  callbacks.current = { onApi, onScoreLoaded, onError };
 
-  // create the API once per mount
+  // one API per mount; settings changes are applied by the effects below
   useEffect(() => {
     if (!host.current) return;
     const settings = new Settings();
     // the Vite plugin copies these to /font and /soundfont (not next to the alphaTab script)
     settings.core.fontDirectory = `${import.meta.env.BASE_URL}font/`;
-    settings.player.soundFont = `${import.meta.env.BASE_URL}soundfont/sonivox.sf2`;
+    settings.core.includeNoteBounds = true;
     settings.display.layoutMode = LayoutMode.Page;
     settings.display.staveProfile = PROFILE[view];
     settings.display.scale = zoom;
-    settings.core.includeNoteBounds = true;
+    settings.player.soundFont = `${import.meta.env.BASE_URL}soundfont/sonivox.sf2`;
+    settings.player.playerMode = PLAYER_MODE[mode];
+    settings.player.enableCursor = true;
+    settings.player.enableAnimatedBeatCursor = true;
+    settings.player.enableElementHighlighting = true;
+    settings.player.enableSeekToClick = true;
+    settings.player.enablePlaybackRangeSelection = true;
+    settings.player.scrollMode = ScrollMode.Continuous;
+    if (scrollElement) settings.player.scrollElement = scrollElement;
     applyThemeColors(settings);
     const a = new AlphaTabApi(host.current, settings);
-    // re-colour when the theme (the `dark` class on <html>) changes
+    a.scoreLoaded.on((score) => callbacks.current.onScoreLoaded?.(score));
+    a.error.on((e) => callbacks.current.onError?.(e.message));
     const themeObserver = new MutationObserver(() => {
       applyThemeColors(a.settings);
       a.updateSettings();
       a.render();
     });
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    a.scoreLoaded.on((score) => callbacks.current.onScoreLoaded?.(score));
-    a.error.on((e) => callbacks.current.onError?.(e.message));
     api.current = a;
-    return () => { themeObserver.disconnect(); a.destroy(); api.current = null; };
-    // settings changes are applied by the effects below
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    callbacks.current.onApi?.(a);
+    return () => {
+      themeObserver.disconnect();
+      callbacks.current.onApi?.(null);
+      a.destroy();
+      api.current = null;
+    };
+  }, [mode, scrollElement]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { api.current?.load(data, [trackIndex]); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { api.current?.load(data, [trackIndex]); }, [data, mode, scrollElement]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const a = api.current;
@@ -71,12 +91,12 @@ export function AlphaTabView({ data, trackIndex, view, zoom, onScoreLoaded, onEr
 
   useEffect(() => {
     const a = api.current;
-    if (!a) return;
+    if (!a || !a.score) return;
     a.settings.display.staveProfile = PROFILE[view];
     a.settings.display.scale = zoom;
     a.updateSettings();
     a.render();
   }, [view, zoom]);
 
-  return <div ref={host} className="min-h-[50vh]" />;
+  return <div ref={host} className="min-h-[50vh] select-none" />;
 }
