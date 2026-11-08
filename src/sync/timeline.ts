@@ -29,6 +29,8 @@ export interface ScoreTiming {
   /** Tempo at the very start of the score. */
   initialBpm: number;
   bars: BarTiming[];
+  /** Bar indexes in the order they are played, when known (from alphaTab); else derived from the repeat marks. */
+  order?: number[];
 }
 
 export interface PlayedBar {
@@ -54,7 +56,10 @@ export interface Timeline {
   totalMs: number;
 }
 
-/** Expands repeats and alternate endings into the order bars are played. */
+/**
+ * Expands repeats and alternate endings into the order bars are played. A simple fallback: the app uses
+ * alphaTab's own order (ScoreTiming.order), which also knows D.C./D.S./Coda jumps.
+ */
 export function playOrder(bars: Pick<BarTiming, 'isRepeatStart' | 'repeatCount' | 'alternateEndings'>[]): number[] {
   const order: number[] = [];
   let start = 0;
@@ -80,7 +85,7 @@ export function playOrder(bars: Pick<BarTiming, 'isRepeatStart' | 'repeatCount' 
 }
 
 export function buildTimeline(timing: ScoreTiming): Timeline {
-  const order = playOrder(timing.bars);
+  const order = timing.order ?? playOrder(timing.bars);
   const seen = new Map<number, number>();
   const played: PlayedBar[] = [];
   // tempo is sticky: it carries over from the previously *played* bar
@@ -187,12 +192,15 @@ export function countPattern([n, d]: [number, number]): { stepQuarters: number; 
 }
 
 /** Metronome click positions for the whole timeline. */
-export function metronomeClicks(tl: Timeline): Click[] {
+export function metronomeClicks(tl: Timeline, barLengths?: Map<number, [number, number]>): Click[] {
   const out: Click[] = [];
   for (const p of tl.played) {
-    const { stepQuarters, count } = countPattern(p.timeSignature);
-    for (let i = 0; i < count && i * stepQuarters < p.quarters - 1e-9; i++) {
-      out.push({ beat: p.startBeat + i * stepQuarters, accent: i === 0, played: p.index });
+    // a bar played with another length (see tempo marks) clicks in that signature, spread over the bar
+    const sig = barLengths?.get(p.index);
+    const quarters = sig ? (sig[0] * 4) / sig[1] : p.quarters;
+    const { stepQuarters, count } = countPattern(sig ?? p.timeSignature);
+    for (let i = 0; i < count && i * stepQuarters < quarters - 1e-9; i++) {
+      out.push({ beat: p.startBeat + ((i * stepQuarters) / quarters) * p.quarters, accent: i === 0, played: p.index });
     }
   }
   return out;

@@ -15,7 +15,7 @@ import { fmtTime } from '@/features/player/BottomBar';
 import { decodeForAnalysis, runAutoSync, waveformPeaks, type Peaks } from '@/sync/runAutoSync';
 import { createSyncMap } from '@/sync/syncMap';
 import {
-  addMark, layoutMarks, markAt, markIndex, marksFromSyncPoints, MAX_BPM, MIN_BPM, moveMark, removeMark, setMarkBpm, shiftMarks,
+  addMark, layoutMarks, markAt, markIndex, marksFromSyncPoints, MAX_BPM, MIN_BPM, moveMark, removeMark, setMarkBpm, setMarkSignature, shiftMarks,
   simplifyMarks, syncPointsFromMarks,
 } from '@/sync/tempoMarks';
 import type { Timeline } from '@/sync/timeline';
@@ -57,7 +57,12 @@ const fromAuto = (tl: Timeline, points: Song['syncPoints'], bpm: number) =>
   simplifyMarks(tl, marksFromSyncPoints(tl, points, bpm), AUTO_TOLERANCE_MS);
 
 const fmtBpm = (bpm: number) => String(Math.round(bpm * 10) / 10);
-const barName = (p: { barIndex: number; occurrence: number }) => `${p.barIndex + 1}${p.occurrence ? '′'.repeat(Math.min(2, p.occurrence)) : ''}`;
+const ORDINAL = ['', '', '2nd', '3rd'];
+/** "5", or "5 (2nd)" / "5 (4th)" when a repeat plays bar 5 again. Numbers are the written bar numbers. */
+const barName = (p: { barIndex: number; occurrence: number }) =>
+  p.occurrence ? `${p.barIndex + 1} (${ORDINAL[p.occurrence + 1] ?? `${p.occurrence + 1}th`})` : String(p.barIndex + 1);
+const SIGNATURES: Array<[number, number]> = [[2, 4], [3, 4], [4, 4], [5, 4], [6, 4], [7, 4], [3, 8], [5, 8], [6, 8], [7, 8], [9, 8], [12, 8]];
+const sigText = (s: [number, number]) => `${s[0]}/${s[1]}`;
 
 export function SyncPanel({ song, controller, recording, onSongChange, onClose, autoRun, onAutoDone }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -114,7 +119,7 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   songRef.current = song;
   useEffect(() => {
     if (!ready) return;
-    controller.setSyncPoints(points);
+    controller.setSyncPoints(points, marks);
     if (!history.touched) return;
     const t = setTimeout(() => {
       const s = songRef.current;
@@ -185,7 +190,8 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
         g.font = '11px ui-monospace, monospace';
         g.fillText(barName(p), x + 4, WAVE_H + 14);
         if (isMark) {
-          const text = `♩ ${fmtBpm(marks[mark]!.bpm)}`;
+          const m = marks[mark]!;
+          const text = `♩ ${fmtBpm(m.bpm)}${m.timeSignature ? ` · ${sigText(m.timeSignature)}` : ''}`;
           g.font = '600 11px system-ui, sans-serif';
           const w = g.measureText(text).width + 10;
           const y = WAVE_H + BARS_H - 24;
@@ -460,6 +466,18 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
           className="h-8 w-16 rounded-control border border-line bg-surface px-2 text-center text-ink tabular-nums" />
         <Button size="sm" variant="ghost" onClick={() => stepBpm(1)} disabled={!selMark} aria-label="Faster">+</Button>
         <span className="text-ink-2">BPM</span>
+        <select aria-label="Bar length from the selected tempo mark" disabled={!selMark}
+          title="Bar length in the recording from this mark until the next one — for when it differs from the score"
+          value={selMark?.timeSignature ? sigText(selMark.timeSignature) : ''}
+          onChange={(e) => {
+            if (!tl) return;
+            const sig = SIGNATURES.find((x) => sigText(x) === e.target.value);
+            history.set(setMarkSignature(tl, marks, sel, sig));
+          }}
+          className="ml-1 h-8 rounded-control border border-line bg-surface px-1.5 text-ink">
+          <option value="">Bars as written</option>
+          {SIGNATURES.map((x) => <option key={sigText(x)} value={sigText(x)}>Bars in {sigText(x)}</option>)}
+        </select>
         <Button size="sm" variant="ghost" onClick={removeSelected} disabled={sel <= 0}>Remove mark</Button>
         <Button size="sm" variant="ghost" onClick={addAtPlayhead} disabled={!ready}>+ Mark at playhead</Button>
         <span className="mx-2 h-5 w-px bg-line" />
@@ -496,7 +514,7 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
           aria-label="Sync timeline: waveform above, bars and tempo marks below"
         />
         <p className="mt-1 text-xs text-muted">
-          Click a barline to add a tempo mark (or select one), then set its BPM — the bars after it follow until the next mark ·
+          Click a barline to add a tempo mark (or select one), then set its BPM and, if the recording's bars differ from the score, their length — both hold until the next mark ·
           drag a barline onto its beat in the waveform · drag empty space to move everything · Delete removes the selected mark ·
           drag the waveform to scroll, click it to jump · scroll or pinch to zoom
         </p>

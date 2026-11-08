@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildTimeline, type BarTiming } from '@/sync/timeline';
 import { createSyncMap } from '@/sync/syncMap';
 import {
-  addMark, layoutMarks, marksFromSyncPoints, moveMark, removeMark, setMarkBpm, shiftMarks, simplifyMarks, syncPointsFromMarks, tempoLabels,
+  addMark, layoutMarks, setMarkSignature, marksFromSyncPoints, moveMark, removeMark, setMarkBpm, shiftMarks, simplifyMarks, syncPointsFromMarks, tempoLabels,
 } from '@/sync/tempoMarks';
 import type { SyncPoint, TempoMark } from '@/data/types';
 
@@ -68,6 +68,21 @@ describe('tempo marks', () => {
     const simple = simplifyMarks(tl, wobbly, 30);
     expect(simple.map((m) => m.barIndex)).toEqual([0, 4]);
     expect(Math.round(simple[1]!.bpm)).toBe(90);
+  });
+
+  it('a mark can change the bar length until the next mark (4/4, one bar of 2/4, 4/4)', () => {
+    // bar 3 is played as 2/4 in the recording although the score writes 4/4
+    let marks = layoutMarks(tl, [mark(0, 0, 120)]);
+    marks = addMark(tl, marks, 2);
+    marks = setMarkSignature(tl, marks, 1, [2, 4]);
+    marks = addMark(tl, marks, 3);
+    expect(marks[2]!.timeSignature).toEqual([2, 4]); // a new mark takes over the bar length…
+    marks = setMarkSignature(tl, marks, 2, undefined); // …until set back to the written one
+    expect(barTimes(marks)).toEqual([0, 2000, 4000, 5000, 7000, 9000, 11000, 13000]);
+    // dragging the mark after the 2/4 bar changes the BPM of that bar only
+    const dragged = moveMark(tl, marks, 2, 6000);
+    expect(dragged[1]!.bpm).toBeCloseTo(60);
+    expect(barTimes(dragged).slice(2, 5)).toEqual([4000, 6000, 8000]);
   });
 
   it('labels the bars where the (rounded) tempo changes', () => {

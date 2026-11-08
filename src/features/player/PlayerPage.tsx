@@ -88,7 +88,7 @@ export function PlayerPage() {
   // one controller per song + recording; audio files are loaded into it
   useEffect(() => {
     if (!active) return;
-    const c = new PlayerController(mode, active.syncPoints);
+    const c = new PlayerController(mode, active.syncPoints, active.tempoMarks);
     setController(c);
     setPartState({});
     void (async () => {

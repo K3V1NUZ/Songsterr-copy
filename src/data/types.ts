@@ -22,6 +22,11 @@ export interface TempoMark {
   /** Time of the bar start in the recording. Free for the first mark, derived for the others. */
   millisecondOffset: number;
   bpm: number;
+  /**
+   * Bar length used from this mark until the next one, as [numerator, denominator] — for when the
+   * recording's bars differ from the score's (e.g. a 2/4 bar written as 4/4). Missing = as written.
+   */
+  timeSignature?: [number, number];
 }
 
 export type ScoreFormat = 'musicxml' | 'mxl' | 'gp3' | 'gp4' | 'gp5' | 'gpx' | 'gp';
