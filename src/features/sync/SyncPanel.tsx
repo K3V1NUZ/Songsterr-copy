@@ -57,10 +57,8 @@ const fromAuto = (tl: Timeline, points: Song['syncPoints'], bpm: number) =>
   simplifyMarks(tl, marksFromSyncPoints(tl, points, bpm), AUTO_TOLERANCE_MS);
 
 const fmtBpm = (bpm: number) => String(Math.round(bpm * 10) / 10);
-const ORDINAL = ['', '', '2nd', '3rd'];
-/** "5", or "5 (2nd)" / "5 (4th)" when a repeat plays bar 5 again. Numbers are the written bar numbers. */
-const barName = (p: { barIndex: number; occurrence: number }) =>
-  p.occurrence ? `${p.barIndex + 1} (${ORDINAL[p.occurrence + 1] ?? `${p.occurrence + 1}th`})` : String(p.barIndex + 1);
+/** Bars are numbered in the order they are played: a repeated bar just gets the next number. */
+const barName = (p: { index: number }) => String(p.index + 1);
 const SIGNATURES: Array<[number, number]> = [[2, 4], [3, 4], [4, 4], [5, 4], [6, 4], [7, 4], [3, 8], [5, 8], [6, 8], [7, 8], [9, 8], [12, 8]];
 const sigText = (s: [number, number]) => `${s[0]}/${s[1]}`;
 

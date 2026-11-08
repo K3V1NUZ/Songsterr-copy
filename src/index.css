@@ -98,10 +98,8 @@ input[type='range'] {
 
 /* alphaTab playback cursor and selections (alphaTab positions these; we only style them) */
 .at-cursor-beat {
-  width: 2px;
-  margin-left: -1px;
   background: var(--c-accent);
-  border-radius: 1px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-accent) 25%, transparent);
 }
 .at-cursor-bar {
   background: color-mix(in srgb, var(--c-accent) 6%, transparent);
