@@ -23,12 +23,13 @@ const isPhone = () => window.matchMedia('(max-width: 767px)').matches;
 export function PlayerPage() {
   const { id = '' } = useParams();
   const location = useLocation();
-  const { current: song, setCurrent, openRight } = useUi();
+  const { current: song, setCurrent, openRight, setQuery, focusSearch } = useUi();
   const [data, setData] = useState<{ fileId: string; bytes: Uint8Array }>();
   const [trackIndex, setTrackIndex] = useState(0);
   const [view, setView] = useState<ScoreView>('tab');
   const [zoom, setZoom] = useState(1);
   const barsPerRow = useSettings((s) => s.barsPerRow);
+  const compact = useSettings((s) => s.tabWidth === 'compact');
   const [error, setError] = useState('');
   const [controller, setController] = useState<PlayerController>();
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
@@ -146,7 +147,6 @@ export function PlayerPage() {
   if (error) return <p className="p-6 text-danger">{error} — <Link className="underline" to="/">back</Link></p>;
   if (!active || !data || !controller) return <p className="p-6 text-muted">Loading…</p>;
 
-  const part = active.parts.find((p) => p.trackIndex === trackIndex);
   const loc = controller.locate(positionMs);
   const barLabel = loc ? `bar ${loc.barIndex + 1}` : '';
   const stemIdsOf = (partId: string) => active.stems.filter((s) => s.partId === partId).map((s) => s.id);
@@ -159,8 +159,6 @@ export function PlayerPage() {
       if (key === 'muted') controller.setPartMuted(trackIdx, next, ids); else controller.setPartSolo(trackIdx, next, ids);
     };
   };
-  const syncText = active.syncSource === 'auto' ? `Synced automatically (${Math.round((active.syncConfidence ?? 0) * 100)} %)`
-    : active.syncSource === 'manual' ? 'Synced by hand' : 'Not synced yet';
 
   return (
     <>
@@ -180,21 +178,16 @@ export function PlayerPage() {
 
         {/* the tab — the only thing that scrolls */}
         <main ref={setScrollEl} className="min-w-0 flex-1 touch-pan-y overflow-y-auto">
-          <div className="mx-auto max-w-[1200px] px-4 pt-4 md:px-10">
-            <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-              <span>♩ = {Math.round(active.bpm)}</span>
-              {part && <span>{part.name}{part.tuning ? ` · ${part.tuning}` : ''}</span>}
-              {mode === 'media' ? (
-                <span>{syncText} · <button type="button" className="text-accent hover:underline" onClick={() => setSync({ open: true, autoRun: active.syncSource === 'none' })}>
-                  {active.syncSource === 'none' ? 'sync it' : 'fix sync'}</button></span>
-              ) : (
-                <span>No recording · <button type="button" className="text-accent hover:underline" onClick={() => openRight({ kind: 'edit', songId: active.id })}>add one</button></span>
-              )}
-            </div>
+          <div className={cx('mx-auto px-3 pt-5 md:px-4', compact && 'max-w-[1200px] md:px-10')}>
+            <h1 className="text-[22px] leading-tight font-semibold">{active.title}</h1>
+            {active.artist && (
+              <button type="button" title={`More songs by ${active.artist}`} className="text-ink-2 hover:text-accent hover:underline"
+                onClick={() => { setQuery(active.artist); focusSearch(); }}>{active.artist}</button>
+            )}
             {playerError && <p className="text-danger">{playerError}</p>}
           </div>
           {scrollEl && (
-            <div ref={pinchZoom.ref} className="mx-auto max-w-[1200px] origin-top px-2 pb-24 md:px-6">
+            <div ref={pinchZoom.ref} className={cx('mx-auto origin-top px-1 pb-24 md:px-2', compact && 'max-w-[1200px] md:px-6')}>
               <AlphaTabView data={data.bytes} trackIndex={trackIndex} view={view} zoom={zoom} barsPerRow={barsPerRow} mode={mode} scrollElement={scrollEl} onApi={onApi} onRendered={pinchZoom.onRendered} onError={setError} />
             </div>
           )}

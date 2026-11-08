@@ -5,11 +5,15 @@ export type Theme = 'system' | 'light' | 'dark';
 
 /** 'auto' = as many bars as fit the width (changes with zoom); a number = always that many. */
 export type BarsPerRow = 'auto' | 4;
+export type TabWidth = 'full' | 'compact';
 
 interface SettingsState {
   theme: Theme;
   setTheme: (theme: Theme) => void;
   barsPerRow: BarsPerRow;
+  /** Tab across the whole window (small side margins) or in a narrower centered column. */
+  tabWidth: TabWidth;
+  setTabWidth: (w: TabWidth) => void;
   setBarsPerRow: (n: BarsPerRow) => void;
 }
 
@@ -17,6 +21,7 @@ export const useSettings = create<SettingsState>()(
   persist((set) => ({
     theme: 'system', setTheme: (theme) => set({ theme }),
     barsPerRow: 'auto', setBarsPerRow: (barsPerRow) => set({ barsPerRow }),
+    tabWidth: 'full', setTabWidth: (tabWidth) => set({ tabWidth }),
   }), { name: 'fretline-settings' }),
 );
 

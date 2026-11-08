@@ -9,27 +9,20 @@ import { LibraryPanel } from '@/features/library/LibraryPanel';
 import { SearchBox } from '@/features/library/SearchBox';
 import { PlayerPage } from '@/features/player/PlayerPage';
 import { UploadPanel } from '@/features/upload/UploadPanel';
-import { applyTheme, useSettings, type BarsPerRow, type Theme } from '@/store/settings';
+import { applyTheme, useSettings, type BarsPerRow, type TabWidth, type Theme } from '@/store/settings';
 import { useUi } from '@/store/ui';
 
 function TopBar() {
-  const { setQuery, current, openRight, focusSearch } = useUi();
-  const { theme, setTheme, barsPerRow, setBarsPerRow } = useSettings();
+  const { openRight } = useUi();
+  const { theme, setTheme, barsPerRow, setBarsPerRow, tabWidth, setTabWidth } = useSettings();
   const [menu, setMenu] = useState(false);
   const navigate = useNavigate();
 
   return (
     <header className="grid shrink-0 grid-cols-[1fr_minmax(0,440px)_1fr] items-center gap-3 border-b border-line px-3 py-2 md:px-4">
       <button type="button" onClick={() => navigate('/')} className="hidden justify-self-start font-bold tracking-tight md:block">Fretline</button>
-      <div className="col-start-2 flex min-w-0 flex-col items-center gap-1 max-md:col-span-2 max-md:col-start-1">
+      <div className="col-start-2 flex min-w-0 justify-center max-md:col-span-2 max-md:col-start-1">
         <SearchBox />
-        {current && (
-          <div className="max-w-full truncate text-center text-[13px] text-ink-2">
-            <b className="font-semibold text-ink">{current.title}</b>
-            {current.artist && <> — <button type="button" title={`Search for ${current.artist}`} className="hover:text-accent hover:underline"
-              onClick={() => { setQuery(current.artist); focusSearch(); }}>{current.artist}</button></>}
-          </div>
-        )}
       </div>
       <div className="col-start-3 flex items-center gap-0.5 justify-self-end">
         <IconButton icon="plus" label="Add a song" onClick={() => openRight({ kind: 'upload' })} />
@@ -41,6 +34,10 @@ function TopBar() {
               <MenuItem key={t} active={theme === t} onClick={() => { setTheme(t); setMenu(false); }}>
                 {t === 'system' ? 'Match system' : t === 'light' ? 'Light' : 'Dark'}
               </MenuItem>
+            ))}
+            <div className="mt-1 border-t border-line px-2.5 pt-2 pb-1 text-xs text-muted">Tab width</div>
+            {([['full', 'Full width'], ['compact', 'Compact (centered)']] as Array<[TabWidth, string]>).map(([v, label]) => (
+              <MenuItem key={v} active={tabWidth === v} onClick={() => { setTabWidth(v); setMenu(false); }}>{label}</MenuItem>
             ))}
             <div className="mt-1 border-t border-line px-2.5 pt-2 pb-1 text-xs text-muted">Bars per row</div>
             {([['auto', 'Fit to width (follows zoom)'], [4, 'Always 4']] as Array<[BarsPerRow, string]>).map(([v, label]) => (
