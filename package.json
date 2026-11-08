@@ -1,14 +1,52 @@
 {
   "name": "fretline",
-  "version": "0.1.0",
-  "description": "Offline, free, personal guitar tab player with audio sync (MusicXML + Guitar Pro)",
+  "version": "0.2.0",
+  "description": "Songsterr-style practice app: bring your own MusicXML / Guitar Pro + recording",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "validate": "node tools/validate.js",
-    "convert": "node tools/convert.js",
-    "demo-audio": "node tools/render-wav.js library/greensleeves/song.musicxml library/greensleeves/audio.wav --lead 2.0 --tempo-scale 0.96",
-    "test": "node tools/selftest.js"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/K3V1NUZ/Songsterr-copy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/K3V1NUZ/Songsterr-copy/issues"
+  },
+  "homepage": "https://github.com/K3V1NUZ/Songsterr-copy#readme",
+  "dependencies": {
+    "@coderline/alphatab": "^1.9.0",
+    "dexie": "^4.4.7",
+    "fflate": "^0.8.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@coderline/alphatab-vite": "^1.9.0",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "fake-indexeddb": "^6.2.7",
+    "jsdom": "^31.0.0",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.1.0"
+  },
+  "private": true
 }
