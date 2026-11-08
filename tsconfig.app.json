@@ -15,9 +15,8 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["vite/client", "vite-plugin-pwa/client"],
-    "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] }
+    "types": ["vite/client", "vite-plugin-pwa/client", "node"],
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src", "tests"]
 }
