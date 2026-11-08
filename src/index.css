@@ -4,61 +4,78 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Design tokens. Neutral placeholders for now — the real look is chosen in the
- * phase-4 design pass. Components only use these names (bg-surface, text-ink, …),
- * so restyling means changing values here, not components.
+ * Design tokens — direction "A2": plain, white, hairline dividers, one blue accent.
+ * Components only use these names (bg-surface, text-ink, border-line, …).
  */
 @theme {
   --color-bg: var(--c-bg);
   --color-surface: var(--c-surface);
   --color-surface-2: var(--c-surface-2);
+  --color-hover: var(--c-hover);
   --color-ink: var(--c-ink);
   --color-ink-2: var(--c-ink-2);
   --color-muted: var(--c-muted);
   --color-line: var(--c-line);
+  --color-line-strong: var(--c-line-strong);
   --color-accent: var(--c-accent);
   --color-accent-ink: var(--c-accent-ink);
   --color-accent-soft: var(--c-accent-soft);
   --color-on-accent: var(--c-on-accent);
+  --color-loop: var(--c-loop);
   --color-danger: var(--c-danger);
   --color-ok: var(--c-ok);
+  --color-warn: var(--c-warn);
+  --color-play: var(--c-play);
+  --color-on-play: var(--c-on-play);
 
-  --font-sans: 'Inter', ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --radius-control: 0.5rem;
-  --radius-panel: 0.875rem;
+  --radius-control: 4px;
+  --radius-panel: 6px;
 }
 
 :root {
-  --c-bg: #f6f6f4;
+  --c-bg: #ffffff;
   --c-surface: #ffffff;
-  --c-surface-2: #eeeeeb;
-  --c-ink: #1f2328;
-  --c-ink-2: #4b535c;
-  --c-muted: #8a9199;
-  --c-line: #dcdcd7;
-  --c-accent: #12808a;
-  --c-accent-ink: #0c6870;
-  --c-accent-soft: rgb(18 128 138 / 0.1);
+  --c-surface-2: #f7f7f8;
+  --c-hover: #f3f4f5;
+  --c-ink: #1c1d1f;
+  --c-ink-2: #5f646b;
+  --c-muted: #9a9fa6;
+  --c-line: #e4e5e7;
+  --c-line-strong: #c4c7cc;
+  --c-accent: #1f6fe5;
+  --c-accent-ink: #1a5fc7;
+  --c-accent-soft: rgb(31 111 229 / 0.07);
   --c-on-accent: #ffffff;
+  --c-loop: #f0a000;
   --c-danger: #c8452f;
-  --c-ok: #2f8f5b;
+  --c-ok: #2e8b57;
+  --c-warn: #b36b00;
+  --c-play: #1c1d1f;
+  --c-on-play: #ffffff;
   color-scheme: light;
 }
 .dark {
-  --c-bg: #16181b;
-  --c-surface: #1e2125;
-  --c-surface-2: #2a2e33;
-  --c-ink: #e8e8e5;
-  --c-ink-2: #b5b9bd;
-  --c-muted: #80868d;
-  --c-line: #33383e;
-  --c-accent: #3bb3b0;
-  --c-accent-ink: #6fd0cc;
-  --c-accent-soft: rgb(59 179 176 / 0.14);
-  --c-on-accent: #0b2223;
+  --c-bg: #151618;
+  --c-surface: #1a1b1e;
+  --c-surface-2: #202226;
+  --c-hover: #24262a;
+  --c-ink: #e8e9eb;
+  --c-ink-2: #a8adb4;
+  --c-muted: #6f747c;
+  --c-line: #2a2c30;
+  --c-line-strong: #43474d;
+  --c-accent: #5b9bff;
+  --c-accent-ink: #8ab6ff;
+  --c-accent-soft: rgb(91 155 255 / 0.1);
+  --c-on-accent: #0b1730;
+  --c-loop: #f0b030;
   --c-danger: #e0715c;
   --c-ok: #5cc28a;
+  --c-warn: #e0a040;
+  --c-play: #e8e9eb;
+  --c-on-play: #151618;
   color-scheme: dark;
 }
 
@@ -68,5 +85,13 @@ body,
   height: 100%;
 }
 body {
-  @apply bg-bg font-sans text-ink antialiased;
+  @apply bg-bg font-sans text-sm text-ink antialiased;
+  overflow: hidden;
+}
+:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 1px;
+}
+input[type='range'] {
+  accent-color: var(--c-ink-2);
 }
