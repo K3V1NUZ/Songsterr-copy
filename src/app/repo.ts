@@ -14,7 +14,7 @@ export async function addScoreFile(name: string, bytes: Uint8Array): Promise<Son
   const file = await repo.putFile({ kind: 'score', name, blob: new Blob([bytes as BlobPart]) });
   return repo.createSong({
     title: info.title, artist: info.artist, bpm: info.tempo, tags: [], ...(info.tuning ? { tuning: info.tuning } : {}),
-    scoreFileId: file.id, scoreFormat: format, parts: info.parts, stems: [], syncPoints: [], syncSource: 'none',
+    scoreFileId: file.id, scoreFormat: format, parts: info.parts, stems: [], syncPoints: [], barNumbering: 'played', syncSource: 'none',
   });
 }
 

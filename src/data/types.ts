@@ -81,6 +81,11 @@ export interface Song {
   parts: Part[];
   stems: Stem[];
   syncPoints: SyncPoint[];
+  /**
+   * 'played': sync points and tempo marks count bars in play order (repeats written out, see
+   * sync/unroll.ts). Missing on songs saved before that; their sync data is moved over once.
+   */
+  barNumbering?: 'played';
   /** The editable sync (tempo marks); `syncPoints` are derived from them when present. */
   tempoMarks?: TempoMark[];
   syncSource: SyncSource;

@@ -9,6 +9,7 @@ import { repo } from '@/app/repo';
 import type { Song } from '@/data/types';
 import { SyncPanel } from '@/features/sync/SyncPanel';
 import { marksFromSyncPoints, tempoLabels } from '@/sync/tempoMarks';
+import { syncPointsToPlayed, tempoMarksToPlayed } from '@/sync/unroll';
 import { useSettings } from '@/store/settings';
 import { useUi } from '@/store/ui';
 import { AlphaTabView, type ScoreView } from './AlphaTabView';
@@ -77,6 +78,22 @@ export function PlayerPage() {
   }, [active, data?.fileId]);
 
   const mode = active?.audioFileId ? 'media' : 'synth';
+
+  // Songs saved before repeats were written out name bars as (written bar, which pass). Move their sync
+  // onto the written-out bars once, before the score is drawn with it.
+  const onUnrolled = useCallback((order: number[]) => {
+    const s = useUi.getState().current;
+    if (!s || s.barNumbering === 'played' || !controller) return;
+    const patch: Partial<Song> = {
+      barNumbering: 'played',
+      syncPoints: syncPointsToPlayed(order, s.syncPoints),
+      ...(s.tempoMarks ? { tempoMarks: tempoMarksToPlayed(order, s.tempoMarks) } : {}),
+      ...(s.autoSyncPoints ? { autoSyncPoints: syncPointsToPlayed(order, s.autoSyncPoints) } : {}),
+    };
+    controller.setSyncPoints(patch.syncPoints!, patch.tempoMarks ?? s.tempoMarks);
+    setCurrent({ ...s, ...patch });
+    void repo.updateSong(s.id, patch).then(setCurrent);
+  }, [controller, setCurrent]);
 
   // the recording's tempo (from the sync) above the bars where it changes
   const tl = controller?.scoreTimeline;
@@ -196,7 +213,7 @@ export function PlayerPage() {
           </div>
           {scrollEl && (
             <div ref={pinchZoom.ref} className={cx('mx-auto origin-top px-1 pb-24 md:px-2', compact && 'max-w-[1200px] md:px-6')}>
-              <AlphaTabView data={data.bytes} trackIndex={trackIndex} view={view} zoom={zoom} barsPerRow={barsPerRow} mode={mode} tempoLabels={labels} scrollElement={scrollEl} onApi={onApi} onRendered={pinchZoom.onRendered} onError={setError} />
+              <AlphaTabView data={data.bytes} trackIndex={trackIndex} view={view} zoom={zoom} barsPerRow={barsPerRow} mode={mode} tempoLabels={labels} onUnrolled={onUnrolled} scrollElement={scrollEl} onApi={onApi} onRendered={pinchZoom.onRendered} onError={setError} />
             </div>
           )}
         </main>

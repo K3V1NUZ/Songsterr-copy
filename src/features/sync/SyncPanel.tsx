@@ -121,7 +121,7 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
     if (!history.touched) return;
     const t = setTimeout(() => {
       const s = songRef.current;
-      void repo.updateSong(s.id, { tempoMarks: marks, syncPoints: points, syncSource: 'manual', syncVersion: s.syncVersion + 1 }).then(onSongChange);
+      void repo.updateSong(s.id, { tempoMarks: marks, syncPoints: points, barNumbering: 'played', syncSource: 'manual', syncVersion: s.syncVersion + 1 }).then(onSongChange);
     }, 600);
     return () => clearTimeout(t);
   }, [points]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -407,7 +407,7 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
       const res = await runAutoSync(recording, score, tl, song.bpm, (fraction, stage) => setBusy({ fraction, stage }));
       const next = fromAuto(tl, res.syncPoints, song.bpm);
       const saved = await repo.updateSong(song.id, {
-        tempoMarks: next, syncPoints: syncPointsFromMarks(tl, next), autoSyncPoints: res.syncPoints,
+        tempoMarks: next, syncPoints: syncPointsFromMarks(tl, next), autoSyncPoints: res.syncPoints, barNumbering: 'played',
         syncSource: 'auto', syncConfidence: res.confidence, syncVersion: song.syncVersion + 1,
       });
       onSongChange(saved);

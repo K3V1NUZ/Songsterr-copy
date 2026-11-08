@@ -2,7 +2,8 @@
 // In 'media' mode alphaTab is driven by our Web Audio engine (external media);
 // in 'synth' mode alphaTab plays the score itself (no recording attached).
 import { useEffect, useRef } from 'react';
-import { AlphaTabApi, LayoutMode, model, NotationElement, PlayerMode, ScrollMode, Settings, StaveProfile, TabRhythmMode } from '@coderline/alphatab';
+import { AlphaTabApi, importer, LayoutMode, model, NotationElement, PlayerMode, ScrollMode, Settings, StaveProfile, TabRhythmMode } from '@coderline/alphatab';
+import { unrollRepeats } from '@/sync/unroll';
 import { patchTabStems, setTempoLabels, styleScore } from './alphaTabTweaks';
 
 export type ScoreView = 'tab' | 'tab+score' | 'score';
@@ -22,6 +23,11 @@ export interface AlphaTabViewProps {
   scrollElement?: HTMLElement | null;
   onApi?: (api: AlphaTabApi | null) => void;
   onScoreLoaded?: (score: model.Score) => void;
+  /**
+   * Called before the score is drawn with the play order its repeats were written out in
+   * (original bar index for each drawn bar).
+   */
+  onUnrolled?: (order: number[]) => void;
   /** After every finished render (e.g. once a new zoom is drawn). */
   onRendered?: () => void;
   onError?: (message: string) => void;
@@ -52,11 +58,11 @@ const PROFILE = { tab: StaveProfile.Tab, 'tab+score': StaveProfile.ScoreTab, sco
 const RHYTHM = { tab: TabRhythmMode.ShowWithBars, 'tab+score': TabRhythmMode.Hidden, score: TabRhythmMode.Hidden } as const;
 const PLAYER_MODE = { media: PlayerMode.EnabledExternalMedia, synth: PlayerMode.EnabledSynthesizer } as const;
 
-export function AlphaTabView({ data, trackIndex, view, zoom, barsPerRow, mode, tempoLabels, scrollElement, onApi, onScoreLoaded, onRendered, onError }: AlphaTabViewProps) {
+export function AlphaTabView({ data, trackIndex, view, zoom, barsPerRow, mode, tempoLabels, scrollElement, onApi, onScoreLoaded, onUnrolled, onRendered, onError }: AlphaTabViewProps) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<AlphaTabApi | null>(null);
-  const callbacks = useRef({ onApi, onScoreLoaded, onRendered, onError });
-  callbacks.current = { onApi, onScoreLoaded, onRendered, onError };
+  const callbacks = useRef({ onApi, onScoreLoaded, onUnrolled, onRendered, onError });
+  callbacks.current = { onApi, onScoreLoaded, onUnrolled, onRendered, onError };
 
   // one API per mount; settings changes are applied by the effects below
   useEffect(() => {
@@ -120,7 +126,18 @@ export function AlphaTabView({ data, trackIndex, view, zoom, barsPerRow, mode, t
     if (api.current?.score) api.current.render();
   }, [labelsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { api.current?.load(data, [trackIndex]); }, [data, mode, scrollElement]); // eslint-disable-line react-hooks/exhaustive-deps
+  // repeats are written out: every played bar is drawn in play order (see sync/unroll.ts)
+  useEffect(() => {
+    const a = api.current;
+    if (!a) return;
+    try {
+      const { score, order } = unrollRepeats(importer.ScoreLoader.loadScoreFromBytes(data, a.settings), a.settings);
+      callbacks.current.onUnrolled?.(order);
+      a.renderScore(score, [trackIndex]);
+    } catch (e) {
+      callbacks.current.onError?.(`Could not read the score: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [data, mode, scrollElement]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const a = api.current;

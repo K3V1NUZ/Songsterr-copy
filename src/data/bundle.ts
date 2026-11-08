@@ -65,6 +65,7 @@ export async function importSongBundle(repo: SongRepository, data: Uint8Array): 
       return [{ id: newId(), name: st.name, fileId, ...(partId ? { partId } : {}) }];
     }),
     syncPoints: s.syncPoints, syncSource: s.syncSource, syncConfidence: s.syncConfidence,
+    ...(s.barNumbering ? { barNumbering: s.barNumbering } : {}),
     ...(s.autoSyncPoints ? { autoSyncPoints: s.autoSyncPoints } : {}),
     ...(s.tempoMarks ? { tempoMarks: s.tempoMarks } : {}),
   });

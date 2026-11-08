@@ -59,6 +59,7 @@ export async function createSongFromUpload(repo: SongRepository, input: UploadIn
     parts: info.parts,
     stems,
     syncPoints: [],
+    barNumbering: 'played',
     syncSource: 'none',
   });
 }
