@@ -13,6 +13,9 @@ interface UiState {
   current: Song | null;
   /** Bumped when songs change, so lists reload. */
   libraryVersion: number;
+  /** Bumped to ask the search field to take focus. */
+  searchFocus: number;
+  focusSearch: () => void;
   setQuery: (q: string) => void;
   openLibrary: (open?: boolean) => void;
   openRight: (p: RightPanel) => void;
@@ -26,6 +29,8 @@ export const useUi = create<UiState>()((set) => ({
   right: null,
   current: null,
   libraryVersion: 0,
+  searchFocus: 0,
+  focusSearch: () => set((s) => ({ searchFocus: s.searchFocus + 1 })),
   setQuery: (query) => set({ query }),
   openLibrary: (open = true) => set({ left: open ? 'library' : null }),
   openRight: (right) => set({ right }),

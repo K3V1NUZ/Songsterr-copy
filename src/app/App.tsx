@@ -1,56 +1,37 @@
 // App shell: top bar (search, current song, add, settings) + one main view.
-// Everything else opens as a side panel.
-import { useEffect, useRef, useState } from 'react';
+// Everything else opens as a side panel (or, for the song list, a window in the middle).
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom';
-import { Icon } from '@/components/icons';
 import { IconButton, MenuItem, Popover } from '@/components/ui';
 import { EditSongPanel } from '@/features/library/EditSongPanel';
 import { HomePage } from '@/features/library/HomePage';
 import { LibraryPanel } from '@/features/library/LibraryPanel';
+import { SearchBox } from '@/features/library/SearchBox';
 import { PlayerPage } from '@/features/player/PlayerPage';
 import { UploadPanel } from '@/features/upload/UploadPanel';
-import { applyTheme, useSettings, type Theme } from '@/store/settings';
+import { applyTheme, useSettings, type BarsPerRow, type Theme } from '@/store/settings';
 import { useUi } from '@/store/ui';
 
 function TopBar() {
-  const { query, setQuery, openLibrary, left, current, openRight } = useUi();
-  const theme = useSettings((s) => s.theme);
-  const setTheme = useSettings((s) => s.setTheme);
+  const { setQuery, current, openRight, focusSearch } = useUi();
+  const { theme, setTheme, barsPerRow, setBarsPerRow } = useSettings();
   const [menu, setMenu] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  // "/" focuses search (desktop habit)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === '/' && !(e.target as HTMLElement | null)?.closest('input, textarea, select')) { e.preventDefault(); input.current?.focus(); }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-3 md:gap-4 md:px-4">
-      <button type="button" onClick={() => navigate('/')} className="hidden w-[192px] text-left font-bold tracking-tight md:block">Fretline</button>
-      <label className={`flex h-8 min-w-0 flex-1 items-center gap-2 rounded-control border px-2.5 md:w-[360px] md:flex-none ${left ? 'border-accent' : 'border-line'}`}>
-        <span className="text-muted"><Icon name="search" /></span>
-        <input
-          ref={input}
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); openLibrary(true); }}
-          onFocus={() => openLibrary(true)}
-          placeholder="Search your songs"
-          aria-label="Search your songs"
-          className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted"
-        />
-        <kbd className="hidden text-xs text-muted md:inline">/</kbd>
-      </label>
-      {current && (
-        <div className="hidden min-w-0 truncate text-ink-2 lg:block">
-          <b className="font-semibold text-ink">{current.title}</b>{current.artist && <> — {current.artist}</>}
-        </div>
-      )}
-      <div className="ml-auto flex items-center gap-0.5">
+    <header className="grid shrink-0 grid-cols-[1fr_minmax(0,440px)_1fr] items-center gap-3 border-b border-line px-3 py-2 md:px-4">
+      <button type="button" onClick={() => navigate('/')} className="hidden justify-self-start font-bold tracking-tight md:block">Fretline</button>
+      <div className="col-start-2 flex min-w-0 flex-col items-center gap-1 max-md:col-span-2 max-md:col-start-1">
+        <SearchBox />
+        {current && (
+          <div className="max-w-full truncate text-center text-[13px] text-ink-2">
+            <b className="font-semibold text-ink">{current.title}</b>
+            {current.artist && <> — <button type="button" title={`Search for ${current.artist}`} className="hover:text-accent hover:underline"
+              onClick={() => { setQuery(current.artist); focusSearch(); }}>{current.artist}</button></>}
+          </div>
+        )}
+      </div>
+      <div className="col-start-3 flex items-center gap-0.5 justify-self-end">
         <IconButton icon="plus" label="Add a song" onClick={() => openRight({ kind: 'upload' })} />
         <div className="relative">
           <IconButton icon="settings" label="Settings" onClick={() => setMenu((m) => !m)} />
@@ -60,6 +41,10 @@ function TopBar() {
               <MenuItem key={t} active={theme === t} onClick={() => { setTheme(t); setMenu(false); }}>
                 {t === 'system' ? 'Match system' : t === 'light' ? 'Light' : 'Dark'}
               </MenuItem>
+            ))}
+            <div className="mt-1 border-t border-line px-2.5 pt-2 pb-1 text-xs text-muted">Bars per row</div>
+            {([['auto', 'Fit to width (follows zoom)'], [4, 'Always 4']] as Array<[BarsPerRow, string]>).map(([v, label]) => (
+              <MenuItem key={v} active={barsPerRow === v} onClick={() => { setBarsPerRow(v); setMenu(false); }}>{label}</MenuItem>
             ))}
           </Popover>
         </div>

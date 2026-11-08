@@ -6,6 +6,7 @@ import { Button, cx, IconButton, MenuItem, Popover, Slider, Toggle } from '@/com
 import type { ScoreView } from './AlphaTabView';
 import type { PlayerController } from './PlayerController';
 import { usePlayer } from './playerStore';
+import { clampZoom } from './usePinchZoom';
 
 export const fmtTime = (ms: number) => {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -128,8 +129,8 @@ export function BottomBar(p: Props) {
         ))}
       </div>
       <span className="mx-1.5 h-5 w-px bg-line max-lg:hidden" />
-      <IconButton icon="zoomOut" label="Smaller" onClick={() => p.onZoom(Math.max(0.6, +(p.zoom - 0.1).toFixed(1)))} className="max-sm:hidden" />
-      <IconButton icon="zoomIn" label="Bigger" onClick={() => p.onZoom(Math.min(2, +(p.zoom + 0.1).toFixed(1)))} className="max-sm:hidden" />
+      <IconButton icon="zoomOut" label="Smaller (Ctrl + scroll or pinch to zoom)" onClick={() => p.onZoom(clampZoom(p.zoom - 0.1))} className="max-sm:hidden" />
+      <IconButton icon="zoomIn" label="Bigger (Ctrl + scroll or pinch to zoom)" onClick={() => p.onZoom(clampZoom(p.zoom + 0.1))} className="max-sm:hidden" />
       <span className="mx-1.5 h-5 w-px bg-line max-sm:hidden" />
       {p.onToggleSync && <IconButton icon="sync" label="Sync with the recording" active={p.syncOpen} onClick={p.onToggleSync} />}
       <IconButton icon="mixer" label="Mixer" active={p.mixerOpen} onClick={p.onToggleMixer} />

@@ -8,12 +8,14 @@ import { cx, TrackItem } from '@/components/ui';
 import { repo } from '@/app/repo';
 import type { Song } from '@/data/types';
 import { SyncPanel } from '@/features/sync/SyncPanel';
+import { useSettings } from '@/store/settings';
 import { useUi } from '@/store/ui';
 import { AlphaTabView, type ScoreView } from './AlphaTabView';
 import { BottomBar } from './BottomBar';
 import { MixerPanel } from './MixerPanel';
 import { PlayerController } from './PlayerController';
 import { usePlayer } from './playerStore';
+import { usePinchZoom } from './usePinchZoom';
 import { useShortcuts } from './useShortcuts';
 
 const isPhone = () => window.matchMedia('(max-width: 767px)').matches;
@@ -26,9 +28,11 @@ export function PlayerPage() {
   const [trackIndex, setTrackIndex] = useState(0);
   const [view, setView] = useState<ScoreView>('tab');
   const [zoom, setZoom] = useState(1);
+  const barsPerRow = useSettings((s) => s.barsPerRow);
   const [error, setError] = useState('');
   const [controller, setController] = useState<PlayerController>();
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
+  const pinchZoom = usePinchZoom(scrollEl, zoom, setZoom);
   const [mixerOpen, setMixerOpen] = useState(false);
   const [tracksOpen, setTracksOpen] = useState(false);
   const [sync, setSync] = useState<{ open: boolean; autoRun: boolean }>({ open: false, autoRun: false });
@@ -175,11 +179,9 @@ export function PlayerPage() {
         </aside>
 
         {/* the tab — the only thing that scrolls */}
-        <main ref={setScrollEl} className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[1200px] px-4 pt-6 md:px-10">
-            <h1 className="text-[22px] leading-tight font-semibold">{active.title}</h1>
-            {active.artist && <p className="text-ink-2">{active.artist}</p>}
-            <div className="mt-2 mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+        <main ref={setScrollEl} className="min-w-0 flex-1 touch-pan-y overflow-y-auto">
+          <div className="mx-auto max-w-[1200px] px-4 pt-4 md:px-10">
+            <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
               <span>♩ = {Math.round(active.bpm)}</span>
               {part && <span>{part.name}{part.tuning ? ` · ${part.tuning}` : ''}</span>}
               {mode === 'media' ? (
@@ -192,8 +194,8 @@ export function PlayerPage() {
             {playerError && <p className="text-danger">{playerError}</p>}
           </div>
           {scrollEl && (
-            <div className="mx-auto max-w-[1200px] px-2 pb-24 md:px-6">
-              <AlphaTabView data={data.bytes} trackIndex={trackIndex} view={view} zoom={zoom} mode={mode} scrollElement={scrollEl} onApi={onApi} onError={setError} />
+            <div ref={pinchZoom.ref} className="mx-auto max-w-[1200px] origin-top px-2 pb-24 md:px-6">
+              <AlphaTabView data={data.bytes} trackIndex={trackIndex} view={view} zoom={zoom} barsPerRow={barsPerRow} mode={mode} scrollElement={scrollEl} onApi={onApi} onRendered={pinchZoom.onRendered} onError={setError} />
             </div>
           )}
         </main>

@@ -10,7 +10,7 @@ import type { PlayerController } from '@/features/player/PlayerController';
 import { usePlayer } from '@/features/player/playerStore';
 import { fmtTime } from '@/features/player/BottomBar';
 import { decodeForAnalysis, runAutoSync, waveformPeaks, type Peaks } from '@/sync/runAutoSync';
-import { createSyncMap, pinSyncPoint, shiftSyncPoints } from '@/sync/syncMap';
+import { createSyncMap, effectiveBpm, pinSyncPoint, retimeSyncPoints, shiftSyncPoints } from '@/sync/syncMap';
 import { useHistory } from './useHistory';
 import { useSettings } from '@/store/settings';
 
@@ -46,6 +46,8 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   const points = history.value;
   const [busy, setBusy] = useState<{ fraction: number; stage: string } | null>(null);
   const [bpm, setBpm] = useState(song.bpm);
+  /** BPM field while typing: the points it started from, so each keystroke re-times from the same base. */
+  const [bpmEdit, setBpmEdit] = useState<{ text: string; base: SyncPoint[] } | null>(null);
   const [tap, setTap] = useState<{ next: number } | null>(null);
   const [message, setMessage] = useState('');
   const drag = useRef<Drag | null>(null);
@@ -242,6 +244,28 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   };
   const nudge = (ms: number) => { history.set(shiftSyncPoints(points, ms)); };
 
+  // BPM = the recording's tempo as the bars are laid out now; changing it spreads or squeezes the bars
+  const shownBpm = tl ? Math.round(effectiveBpm(tl, points) * 10) / 10 : song.bpm;
+  const saveBpm = (n: number) => { setBpm(n); void repo.updateSong(song.id, { bpm: n }).then(onSongChange); };
+  const typeBpm = (text: string) => {
+    const base = bpmEdit?.base ?? points;
+    setBpmEdit({ text, base });
+    const n = Number(text);
+    if (tl && n >= 20 && n <= 400) history.preview(retimeSyncPoints(tl, base, n));
+  };
+  const endBpmEdit = () => {
+    if (!bpmEdit) return;
+    const n = Number(bpmEdit.text);
+    setBpmEdit(null);
+    if (n >= 20 && n <= 400) { history.commit(); saveBpm(n); } else history.preview(bpmEdit.base);
+  };
+  const stepBpm = (d: number) => {
+    if (!tl) return;
+    const n = Math.max(20, Math.min(400, Math.round(shownBpm) + d));
+    history.set(retimeSyncPoints(tl, points, n));
+    saveBpm(n);
+  };
+
   const doTap = useCallback(() => {
     if (!tl || !tap) return;
     const p = tl.played[tap.next];
@@ -305,10 +329,13 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
         <strong>Sync</strong>
         <span className="text-ink-2">{sourceText}</span>
-        <label className="ml-2 flex items-center gap-1 text-ink-2">BPM
-          <input type="number" min={20} max={400} value={bpm} onChange={(e) => setBpm(Number(e.target.value))}
-            onBlur={() => void repo.updateSong(song.id, { bpm }).then(onSongChange)}
-            className="h-8 w-16 rounded-control border border-line bg-surface px-2 text-ink" />
+        <label className="ml-2 flex items-center gap-1 text-ink-2" title="Tempo of the recording: changing it moves the bars closer together or further apart">BPM
+          <Button size="sm" variant="ghost" onClick={() => stepBpm(-1)} aria-label="Slower">−</Button>
+          <input inputMode="decimal" value={bpmEdit?.text ?? String(shownBpm)}
+            onChange={(e) => typeBpm(e.target.value.replace(/[^\d.]/g, ''))}
+            onBlur={endBpmEdit} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+            className="h-8 w-16 rounded-control border border-line bg-surface px-2 text-center text-ink tabular-nums" />
+          <Button size="sm" variant="ghost" onClick={() => stepBpm(1)} aria-label="Faster">+</Button>
         </label>
         <Button size="sm" variant="primary" onClick={() => void autoSync()} disabled={!!busy || !recording}>Auto-sync</Button>
         {busy && (

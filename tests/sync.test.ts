@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildTimeline, playOrder, beatToScoreMs, metronomeClicks, type BarTiming, type ScoreTiming } from '@/sync/timeline';
-import { createSyncMap, pinSyncPoint, shiftSyncPoints, syncPointsFromOffset } from '@/sync/syncMap';
+import { createSyncMap, effectiveBpm, pinSyncPoint, retimeSyncPoints, shiftSyncPoints, syncPointsFromOffset } from '@/sync/syncMap';
 import type { SyncPoint } from '@/data/types';
 
 const bar = (over: Partial<BarTiming> = {}): BarTiming => ({ quarters: 4, tempoChanges: [], isRepeatStart: false, repeatCount: 0, alternateEndings: 0, ...over });
@@ -102,6 +102,21 @@ describe('sync point helpers', () => {
     const pts = [sp(0, 0), sp(1, 4000), sp(2, 8000), sp(3, 12000)];
     const out = pinSyncPoint(tl, pts, sp(1, 9000));
     expect(out.map((p) => [p.barIndex, p.millisecondOffset])).toEqual([[0, 0], [1, 9000], [3, 12000]]);
+  });
+  it('reads the recording tempo from the points', () => {
+    expect(effectiveBpm(tl, [sp(0, 1000)])).toBe(60);
+    expect(effectiveBpm(tl, [sp(0, 1000), sp(3, 7000)])).toBeCloseTo(120);
+  });
+  it('re-timing to a new BPM moves the bars closer or further apart, keeping the first point', () => {
+    const faster = retimeSyncPoints(tl, [sp(0, 1000), sp(2, 9000), sp(3, 13000)], 120);
+    expect(faster.map((p) => p.millisecondOffset)).toEqual([1000, 5000, 7000]);
+    const slower = retimeSyncPoints(tl, faster, 30);
+    expect(slower.map((p) => p.millisecondOffset)).toEqual([1000, 17000, 25000]);
+  });
+  it('re-timing a single point adds a partner so the spacing changes', () => {
+    const out = retimeSyncPoints(tl, [sp(1, 5000)], 120);
+    expect(createSyncMap(tl, out).beatToMs(8)).toBeCloseTo(7000);
+    expect(effectiveBpm(tl, out)).toBeCloseTo(120);
   });
 });
 

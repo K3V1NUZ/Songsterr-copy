@@ -13,11 +13,15 @@ export interface AlphaTabViewProps {
   trackIndex: number;
   view: ScoreView;
   zoom: number;
+  /** 'auto' = as many as fit (changes with zoom), or a fixed number per row. */
+  barsPerRow: 'auto' | number;
   mode: AudioMode;
   /** Element alphaTab scrolls to keep the cursor visible. */
   scrollElement?: HTMLElement | null;
   onApi?: (api: AlphaTabApi | null) => void;
   onScoreLoaded?: (score: model.Score) => void;
+  /** After every finished render (e.g. once a new zoom is drawn). */
+  onRendered?: () => void;
   onError?: (message: string) => void;
 }
 
@@ -46,11 +50,11 @@ const PROFILE = { tab: StaveProfile.Tab, 'tab+score': StaveProfile.ScoreTab, sco
 const RHYTHM = { tab: TabRhythmMode.ShowWithBars, 'tab+score': TabRhythmMode.Hidden, score: TabRhythmMode.Hidden } as const;
 const PLAYER_MODE = { media: PlayerMode.EnabledExternalMedia, synth: PlayerMode.EnabledSynthesizer } as const;
 
-export function AlphaTabView({ data, trackIndex, view, zoom, mode, scrollElement, onApi, onScoreLoaded, onError }: AlphaTabViewProps) {
+export function AlphaTabView({ data, trackIndex, view, zoom, barsPerRow, mode, scrollElement, onApi, onScoreLoaded, onRendered, onError }: AlphaTabViewProps) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<AlphaTabApi | null>(null);
-  const callbacks = useRef({ onApi, onScoreLoaded, onError });
-  callbacks.current = { onApi, onScoreLoaded, onError };
+  const callbacks = useRef({ onApi, onScoreLoaded, onRendered, onError });
+  callbacks.current = { onApi, onScoreLoaded, onRendered, onError };
 
   // one API per mount; settings changes are applied by the effects below
   useEffect(() => {
@@ -66,6 +70,7 @@ export function AlphaTabView({ data, trackIndex, view, zoom, mode, scrollElement
     settings.display.staveProfile = PROFILE[view];
     settings.display.scale = zoom * baseScale();
     settings.notation.rhythmMode = RHYTHM[view];
+    settings.display.barsPerRow = barsPerRow === 'auto' ? -1 : barsPerRow;
     settings.player.soundFont = `${import.meta.env.BASE_URL}soundfont/sonivox.sf2`;
     settings.player.playerMode = PLAYER_MODE[mode];
     settings.player.enableCursor = true;
@@ -87,6 +92,7 @@ export function AlphaTabView({ data, trackIndex, view, zoom, mode, scrollElement
     const a = new AlphaTabApi(host.current, settings);
     a.scoreLoaded.on((score) => { styleScore(score); callbacks.current.onScoreLoaded?.(score); });
     a.error.on((e) => callbacks.current.onError?.(e.message));
+    a.renderFinished.on(() => callbacks.current.onRendered?.());
     const themeObserver = new MutationObserver(() => {
       applyThemeColors(a.settings);
       a.updateSettings();
@@ -117,9 +123,10 @@ export function AlphaTabView({ data, trackIndex, view, zoom, mode, scrollElement
     a.settings.display.staveProfile = PROFILE[view];
     a.settings.display.scale = zoom * baseScale();
     a.settings.notation.rhythmMode = RHYTHM[view];
+    a.settings.display.barsPerRow = barsPerRow === 'auto' ? -1 : barsPerRow;
     a.updateSettings();
     a.render();
-  }, [view, zoom]);
+  }, [view, zoom, barsPerRow]);
 
   return <div ref={host} className="min-h-[50vh] select-none" />;
 }

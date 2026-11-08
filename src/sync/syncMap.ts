@@ -5,7 +5,7 @@
 // and after the last sync point the score's own tempo curve is followed,
 // scaled by the nearest segment's speed ratio.
 import type { SyncPoint } from '@/data/types';
-import { beatAt, beatToScoreMs, findPlayed, playedAtBeat, type Timeline } from './timeline';
+import { beatAt, beatToScoreMs, bpmAtBeat, findPlayed, playedAtBeat, type Timeline } from './timeline';
 
 export interface Anchor {
   beat: number;
@@ -102,6 +102,40 @@ export function syncPointsFromOffset(tl: Timeline, offsetMs: number, speed = 1, 
     }
   });
   return pts;
+}
+
+/**
+ * Tempo of the recording implied by the sync points: the score's opening tempo scaled by the overall
+ * speed between the first and last anchor. With fewer than two anchors the score's own tempo is used.
+ */
+export function effectiveBpm(tl: Timeline, points: SyncPoint[]): number {
+  const base = bpmAtBeat(tl, 0);
+  const a = toAnchors(tl, points);
+  if (a.length < 2) return base;
+  const f = a[0]!, l = a[a.length - 1]!;
+  return (base * (beatToScoreMs(tl, l.beat) - beatToScoreMs(tl, f.beat))) / (l.ms - f.ms);
+}
+
+/**
+ * Re-times the sync points for a new recording tempo: the earliest point stays where it is and every
+ * other point moves closer (faster) or further away (slower). A single point gets a tempo-following
+ * partner at the last bar, so the bar spacing really changes.
+ */
+export function retimeSyncPoints(tl: Timeline, points: SyncPoint[], bpm: number): SyncPoint[] {
+  if (!(bpm > 0) || !points.length) return points;
+  const withBeat = points.map((sp) => {
+    const p = findPlayed(tl, sp.barIndex, sp.barOccurence);
+    return { sp, beat: p ? beatAt(p, sp.barPosition) : Infinity };
+  });
+  const first = withBeat.reduce((a, b) => (b.beat < a.beat ? b : a));
+  if (toAnchors(tl, points).length < 2) {
+    if (first.beat === Infinity) return points;
+    const speed = bpm / bpmAtBeat(tl, 0);
+    return syncPointsFromOffset(tl, first.sp.millisecondOffset - beatToScoreMs(tl, first.beat) / speed, speed);
+  }
+  const factor = effectiveBpm(tl, points) / bpm;
+  const t0 = first.sp.millisecondOffset;
+  return points.map((p) => ({ ...p, millisecondOffset: t0 + (p.millisecondOffset - t0) * factor }));
 }
 
 /** Moves every sync point by `deltaMs` (dragging the whole bar lane). */
