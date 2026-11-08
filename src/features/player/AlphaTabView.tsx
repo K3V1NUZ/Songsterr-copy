@@ -2,7 +2,7 @@
 // In 'media' mode alphaTab is driven by our Web Audio engine (external media);
 // in 'synth' mode alphaTab plays the score itself (no recording attached).
 import { useEffect, useRef } from 'react';
-import { AlphaTabApi, LayoutMode, model, PlayerMode, ScrollMode, Settings, StaveProfile } from '@coderline/alphatab';
+import { AlphaTabApi, LayoutMode, model, NotationElement, PlayerMode, ScrollMode, Settings, StaveProfile } from '@coderline/alphatab';
 
 export type ScoreView = 'tab' | 'tab+score' | 'score';
 export type AudioMode = 'media' | 'synth';
@@ -60,7 +60,14 @@ export function AlphaTabView({ data, trackIndex, view, zoom, mode, scrollElement
     settings.player.enableSeekToClick = true;
     settings.player.enablePlaybackRangeSelection = true;
     settings.player.scrollMode = ScrollMode.Continuous;
+    // keep some room above the cursor line (and the song header visible at the start)
+    settings.player.scrollOffsetY = -140;
     if (scrollElement) settings.player.scrollElement = scrollElement;
+    // the page shows its own title/artist header; keep only the music
+    for (const el of [NotationElement.ScoreTitle, NotationElement.ScoreSubTitle, NotationElement.ScoreArtist, NotationElement.ScoreAlbum,
+      NotationElement.ScoreWords, NotationElement.ScoreMusic, NotationElement.ScoreWordsAndMusic, NotationElement.ScoreCopyright]) {
+      settings.notation.elements.set(el, false);
+    }
     applyThemeColors(settings);
     const a = new AlphaTabApi(host.current, settings);
     a.scoreLoaded.on((score) => callbacks.current.onScoreLoaded?.(score));

@@ -1,24 +1,26 @@
-// Player: track list (left), tab (centre), transport (bottom), mixer panel.
-// Placeholder styling until the design pass (phase 4).
-import { useCallback, useEffect, useRef, useState } from 'react';
+// Player (design A2): instruments panel left, the tab in the middle (the only thing
+// that scrolls), mixer as a right panel, sync tool as a bottom drawer, bottom bar.
+import { useCallback, useEffect, useState } from 'react';
 import type { AlphaTabApi } from '@coderline/alphatab';
-import { Link, useParams } from 'react-router-dom';
-import { Panel, TrackItem } from '@/components/ui';
+import { Link, useLocation, useParams } from 'react-router-dom';
+import { instrumentIcon } from '@/components/icons';
+import { cx, TrackItem } from '@/components/ui';
 import { repo } from '@/app/repo';
-import { newId } from '@/data/SongRepository';
 import type { Song } from '@/data/types';
+import { SyncPanel } from '@/features/sync/SyncPanel';
+import { useUi } from '@/store/ui';
 import { AlphaTabView, type ScoreView } from './AlphaTabView';
+import { BottomBar } from './BottomBar';
 import { MixerPanel } from './MixerPanel';
 import { PlayerController } from './PlayerController';
-import { TransportBar } from './TransportBar';
 import { usePlayer } from './playerStore';
 import { useShortcuts } from './useShortcuts';
-import { SyncPanel } from '@/features/sync/SyncPanel';
 
 export function PlayerPage() {
   const { id = '' } = useParams();
-  const [song, setSong] = useState<Song>();
-  const [data, setData] = useState<Uint8Array>();
+  const location = useLocation();
+  const { current: song, setCurrent, openRight } = useUi();
+  const [data, setData] = useState<{ fileId: string; bytes: Uint8Array }>();
   const [trackIndex, setTrackIndex] = useState(0);
   const [view, setView] = useState<ScoreView>('tab');
   const [zoom, setZoom] = useState(1);
@@ -26,185 +28,187 @@ export function PlayerPage() {
   const [controller, setController] = useState<PlayerController>();
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
   const [mixerOpen, setMixerOpen] = useState(false);
+  const [tracksOpen, setTracksOpen] = useState(false); // phones only
   const [sync, setSync] = useState<{ open: boolean; autoRun: boolean }>({ open: false, autoRun: false });
   const [recording, setRecording] = useState<Blob | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const pickFor = useRef<'recording' | 'stem'>('recording');
+  const [api, setApi] = useState<AlphaTabApi | null>(null);
+  const [partState, setPartState] = useState<Record<number, { muted?: boolean; solo?: boolean }>>({});
   const playerError = usePlayer((s) => s.error);
+  const positionMs = usePlayer((s) => s.positionMs);
+  usePlayer((s) => s.scoreVersion);
 
-  // load song + score bytes
+  // load the song (and its view settings); the song object lives in the UI store so
+  // edits made in the edit panel show up here too
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    setError('');
+    void (async () => {
       const s = await repo.getSong(id);
-      if (!s) return setError('Song not found');
-      const file = await repo.getFile(s.scoreFileId);
-      if (!file?.blob) return setError('The score file is missing');
-      const bytes = new Uint8Array(await file.blob.arrayBuffer());
-      const settings = await repo.getSettings(s.id);
       if (cancelled) return;
-      setSong(s);
-      setData(bytes);
-      if (settings) { setTrackIndex(settings.trackIndex); setView(settings.view); setZoom(settings.zoom); }
+      if (!s) { setError('Song not found'); return; }
+      const st = await repo.getSettings(s.id);
+      if (st) { setTrackIndex(st.trackIndex); setView(st.view); setZoom(st.zoom); }
+      setCurrent(s);
     })();
     return () => { cancelled = true; };
-  }, [id]);
+  }, [id, setCurrent]);
 
-  const mode = song?.audioFileId ? 'media' : 'synth';
+  const active = song && song.id === id ? song : undefined;
 
-  // one controller per song + mode; audio files are loaded into it
+  // score bytes (reload when the score file is replaced)
   useEffect(() => {
-    if (!song) return;
-    const c = new PlayerController(mode, song.syncPoints);
+    if (!active) return;
+    if (data?.fileId === active.scoreFileId) return;
+    let cancelled = false;
+    void repo.getFile(active.scoreFileId).then(async (f) => {
+      if (!f?.blob) { setError('The score file is missing'); return; }
+      const bytes = new Uint8Array(await f.blob.arrayBuffer());
+      if (!cancelled) setData({ fileId: active.scoreFileId, bytes });
+    });
+    return () => { cancelled = true; };
+  }, [active, data?.fileId]);
+
+  const mode = active?.audioFileId ? 'media' : 'synth';
+
+  // one controller per song + recording; audio files are loaded into it
+  useEffect(() => {
+    if (!active) return;
+    const c = new PlayerController(mode, active.syncPoints);
     setController(c);
-    (async () => {
-      if (song.audioFileId) {
-        const f = await repo.getFile(song.audioFileId);
+    setPartState({});
+    void (async () => {
+      if (active.audioFileId) {
+        const f = await repo.getFile(active.audioFileId);
         setRecording(f?.blob ?? null);
         if (f?.blob) await c.setRecording(f.blob);
       } else setRecording(null);
-      for (const st of song.stems) {
+      for (const st of active.stems) {
         const f = await repo.getFile(st.fileId);
         if (f?.blob) await c.addStem(st.id, f.blob);
       }
+      const saved = await repo.getSettings(active.id);
+      if (saved) {
+        for (const [ch, v] of Object.entries(saved.volumes)) c.setVolume(ch, v);
+        saved.muted.forEach((ch) => c.setMuted(ch, true));
+        saved.solo.forEach((ch) => c.setSolo(ch, true));
+        if (saved.speed !== 1) c.setSpeed(saved.speed);
+      }
     })().catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
     return () => c.destroy();
-  }, [song?.id, song?.audioFileId, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active?.id, active?.audioFileId, active?.stems.length, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // restore this song's mixer + speed into a new controller
-  useEffect(() => {
-    if (!song || !controller) return;
-    let cancelled = false;
-    void repo.getSettings(song.id).then((st) => {
-      if (cancelled || !st) return;
-      for (const [ch, v] of Object.entries(st.volumes)) controller.setVolume(ch, v);
-      st.muted.forEach((ch) => controller.setMuted(ch, true));
-      st.solo.forEach((ch) => controller.setSolo(ch, true));
-      if (st.speed !== 1) controller.setSpeed(st.speed);
-    });
-    return () => { cancelled = true; };
-  }, [controller]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // remember view, mixer and speed per song
-  const channels = usePlayer((s) => s.channels);
-  const speed = usePlayer((s) => s.speed);
-  useEffect(() => {
-    if (!song) return;
-    const t = setTimeout(() => {
-      const entries = Object.entries(channels);
-      void repo.saveSettings({
-        songId: song.id, trackIndex, view, zoom, speed,
-        volumes: Object.fromEntries(entries.map(([k, c]) => [k, c.volume])),
-        muted: entries.filter(([, c]) => c.muted).map(([k]) => k),
-        solo: entries.filter(([, c]) => c.solo).map(([k]) => k),
-      });
-    }, 400);
-    return () => clearTimeout(t);
-  }, [song, trackIndex, view, zoom, channels, speed]);
-
-  // dev-only hook for browser tests
-  useEffect(() => {
-    if (import.meta.env.DEV && controller) Object.assign(window, { __fretline: { controller, repo, song } });
-  }, [controller, song]);
-
-  // the alphaTab API and the controller can each be re-created (e.g. when a recording is
-  // attached the mode changes); connect whichever pair is current
-  const [api, setApi] = useState<AlphaTabApi | null>(null);
   useEffect(() => {
     if (!controller) return;
     controller.attach(api);
     return () => controller.attach(null);
   }, [controller, api]);
   const onApi = useCallback((a: AlphaTabApi | null) => setApi(a), []);
+
+  // a new upload with a recording: run auto-sync straight away
+  useEffect(() => {
+    const st = location.state as { autoSync?: boolean } | null;
+    if (st?.autoSync && mode === 'media') { setSync({ open: true, autoRun: true }); window.history.replaceState({}, ''); }
+  }, [location.state, mode]);
+
+  // remember view, mixer and speed per song
+  const channels = usePlayer((s) => s.channels);
+  const speed = usePlayer((s) => s.speed);
+  useEffect(() => {
+    if (!active) return;
+    const t = setTimeout(() => {
+      const entries = Object.entries(channels);
+      void repo.saveSettings({
+        songId: active.id, trackIndex, view, zoom, speed,
+        volumes: Object.fromEntries(entries.map(([k, c]) => [k, c.volume])),
+        muted: entries.filter(([, c]) => c.muted).map(([k]) => k),
+        solo: entries.filter(([, c]) => c.solo).map(([k]) => k),
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [active, trackIndex, view, zoom, channels, speed]);
+
   useShortcuts(controller, {
-    trackCount: song?.parts.length ?? 0,
-    selectTrack: (i) => { const part = song?.parts[i]; if (part) setTrackIndex(part.trackIndex); },
+    trackCount: active?.parts.length ?? 0,
+    selectTrack: (i) => { const part = active?.parts[i]; if (part) setTrackIndex(part.trackIndex); },
     nextTrack: () => {
-      if (!song?.parts.length) return;
-      const k = song.parts.findIndex((p) => p.trackIndex === trackIndex);
-      setTrackIndex(song.parts[(k + 1) % song.parts.length]!.trackIndex);
+      if (!active?.parts.length) return;
+      const k = active.parts.findIndex((p) => p.trackIndex === trackIndex);
+      setTrackIndex(active.parts[(k + 1) % active.parts.length]!.trackIndex);
     },
   });
 
-  const onPickFile = async (file: File) => {
-    if (!song || !controller) return;
-    const kind = pickFor.current;
-    const stored = await repo.putFile({ kind: kind === 'recording' ? 'audio' : 'stem', name: file.name, blob: file });
-    if (kind === 'recording') {
-      setSong(await repo.updateSong(song.id, { audioFileId: stored.id }));
-      // a new recording: sync it automatically (the tool stays open only if it's unsure)
-      setSync({ open: true, autoRun: true });
-    } else {
-      const part = song.parts.find((p) => p.trackIndex === trackIndex);
-      const stem = { id: newId(), name: file.name.replace(/\.[^.]+$/, ''), fileId: stored.id, ...(part ? { partId: part.id } : {}) };
-      const next = await repo.updateSong(song.id, { stems: [...song.stems, stem] });
-      setSong(next);
-      await controller.addStem(stem.id, file);
-    }
-  };
+  if (error) return <p className="p-6 text-danger">{error} — <Link className="underline" to="/">back</Link></p>;
+  if (!active || !data || !controller) return <p className="p-6 text-muted">Loading…</p>;
 
-  if (error) return <p className="p-6 text-danger">{error} — <Link className="underline" to="/">back to library</Link></p>;
-  if (!song || !data || !controller) return <p className="p-6 text-muted">Loading…</p>;
+  const part = active.parts.find((p) => p.trackIndex === trackIndex);
+  const loc = controller.locate(positionMs);
+  const barLabel = loc ? `bar ${loc.barIndex + 1}` : '';
+  const stemIdsOf = (partId: string) => active.stems.filter((s) => s.partId === partId).map((s) => s.id);
+  const partToggle = (trackIdx: number, partId: string, key: 'muted' | 'solo') => {
+    const ids = stemIdsOf(partId);
+    if (mode === 'media' && !ids.length) return undefined; // nothing to mute: the part is inside the recording
+    return () => {
+      const next = !partState[trackIdx]?.[key];
+      setPartState((ps) => ({ ...ps, [trackIdx]: { ...ps[trackIdx], [key]: next } }));
+      if (key === 'muted') controller.setPartMuted(trackIdx, next, ids); else controller.setPartSolo(trackIdx, next, ids);
+    };
+  };
+  const syncText = active.syncSource === 'auto' ? `Synced automatically (${Math.round((active.syncConfidence ?? 0) * 100)} %)`
+    : active.syncSource === 'manual' ? 'Synced by hand' : 'Not synced yet';
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <aside className="shrink-0 border-b border-line p-3 md:w-64 md:overflow-auto md:border-r md:border-b-0">
-          <h1 className="px-3 text-lg font-semibold">{song.title}</h1>
-          <p className="mb-3 px-3 text-sm text-ink-2">{song.artist}</p>
-          <div className="flex gap-1 overflow-x-auto md:flex-col">
-            {song.parts.map((p) => (
-              <TrackItem key={p.id} name={p.name}
-                detail={[p.instrument, p.tuning, song.stems.some((s) => s.partId === p.id) ? 'stem' : ''].filter(Boolean).join(' · ')}
-                selected={p.trackIndex === trackIndex} onSelect={() => setTrackIndex(p.trackIndex)} />
-            ))}
-          </div>
+    <>
+      <div className="relative flex min-h-0 flex-1">
+        {/* instruments: docked on desktop, sliding in on phones */}
+        <aside className={cx('z-20 w-56 shrink-0 overflow-y-auto border-r border-line bg-surface py-2',
+          'max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:shadow-xl', !tracksOpen && 'max-md:hidden')}>
+          {active.parts.map((p) => (
+            <TrackItem key={p.id} name={p.name} icon={instrumentIcon(p.instrument)}
+              detail={[p.instrument, p.tuning].filter(Boolean).join(' · ')}
+              selected={p.trackIndex === trackIndex}
+              muted={partState[p.trackIndex]?.muted} solo={partState[p.trackIndex]?.solo}
+              onSelect={() => { setTrackIndex(p.trackIndex); setTracksOpen(false); }}
+              onToggleMute={partToggle(p.trackIndex, p.id, 'muted')} onToggleSolo={partToggle(p.trackIndex, p.id, 'solo')} />
+          ))}
         </aside>
-        <main ref={setScrollEl} className="relative min-w-0 flex-1 overflow-auto">
-          <div className="sticky top-0 z-10 flex flex-wrap gap-1 border-b border-line bg-bg/90 p-2 backdrop-blur">
-            {(['tab', 'tab+score', 'score'] as const).map((v) => (
-              <button key={v} type="button" onClick={() => setView(v)}
-                className={`h-8 rounded-control px-3 text-sm ${view === v ? 'bg-accent-soft text-accent-ink' : 'text-ink-2 hover:bg-surface-2'}`}>
-                {v === 'tab' ? 'Tab' : v === 'score' ? 'Notation' : 'Tab + notation'}
-              </button>
-            ))}
-            <span className="flex-1" />
-            <button type="button" className="h-8 w-8 rounded-control text-ink-2 hover:bg-surface-2" onClick={() => setZoom((z) => Math.max(0.6, +(z - 0.1).toFixed(1)))} aria-label="Smaller">−</button>
-            <span className="self-center font-mono text-xs text-ink-2">{Math.round(zoom * 100)}%</span>
-            <button type="button" className="h-8 w-8 rounded-control text-ink-2 hover:bg-surface-2" onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)))} aria-label="Bigger">+</button>
+
+        {/* the tab — the only thing that scrolls */}
+        <main ref={setScrollEl} className="min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-[1200px] px-4 pt-6 md:px-10">
+            <h1 className="text-[22px] leading-tight font-semibold">{active.title}</h1>
+            {active.artist && <p className="text-ink-2">{active.artist}</p>}
+            <div className="mt-2 mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+              <span>♩ = {Math.round(active.bpm)}</span>
+              {part && <span>{part.name}{part.tuning ? ` · ${part.tuning}` : ''}</span>}
+              {mode === 'media' ? (
+                <span>{syncText} · <button type="button" className="text-accent hover:underline" onClick={() => setSync({ open: true, autoRun: active.syncSource === 'none' })}>
+                  {active.syncSource === 'none' ? 'sync it' : 'fix sync'}</button></span>
+              ) : (
+                <span>No recording · <button type="button" className="text-accent hover:underline" onClick={() => openRight({ kind: 'edit', songId: active.id })}>add one</button></span>
+              )}
+            </div>
+            {playerError && <p className="text-danger">{playerError}</p>}
           </div>
-          {playerError && <p className="px-4 py-2 text-sm text-danger">{playerError}</p>}
-          {mode === 'media' && !sync.open && (
-            <p className="px-4 pt-2 text-xs text-muted">
-              {song.syncSource === 'auto' ? `Synced automatically (${Math.round((song.syncConfidence ?? 0) * 100)} %). ` : song.syncSource === 'manual' ? 'Synced by hand. ' : 'Not synced yet. '}
-              <button type="button" className="text-accent-ink underline" onClick={() => setSync({ open: true, autoRun: song.syncSource === 'none' })}>
-                {song.syncSource === 'none' ? 'Sync it' : 'Sync looks off? Fix it'}
-              </button>
-            </p>
-          )}
           {scrollEl && (
-            <AlphaTabView data={data} trackIndex={trackIndex} view={view} zoom={zoom} mode={mode} scrollElement={scrollEl} onApi={onApi} onError={setError} />
+            <div className="mx-auto max-w-[1200px] px-2 pb-24 md:px-6">
+              <AlphaTabView data={data.bytes} trackIndex={trackIndex} view={view} zoom={zoom} mode={mode} scrollElement={scrollEl} onApi={onApi} onError={setError} />
+            </div>
           )}
         </main>
-        {mixerOpen && (
-          <aside className="shrink-0 border-t border-line p-3 md:w-72 md:overflow-auto md:border-t-0 md:border-l">
-            <Panel title="Mixer">
-              <MixerPanel song={song} controller={controller}
-                onAttachRecording={() => { pickFor.current = 'recording'; fileInput.current?.click(); }}
-                onAddStem={() => { pickFor.current = 'stem'; fileInput.current?.click(); }} />
-            </Panel>
-          </aside>
-        )}
+
+        {mixerOpen && <MixerPanel song={active} controller={controller} onClose={() => setMixerOpen(false)} onEditFiles={() => openRight({ kind: 'edit', songId: active.id })} />}
       </div>
+
       {sync.open && mode === 'media' && (
-        <SyncPanel song={song} controller={controller} recording={recording} autoRun={sync.autoRun}
-          onSongChange={(s) => setSong(s)}
+        <SyncPanel song={active} controller={controller} recording={recording} autoRun={sync.autoRun}
+          onSongChange={(s: Song) => setCurrent(s)}
           onAutoDone={(confidence) => { if (confidence >= 0.6 && sync.autoRun) setSync({ open: false, autoRun: false }); }}
           onClose={() => setSync({ open: false, autoRun: false })} />
       )}
-      <TransportBar controller={controller} mixerOpen={mixerOpen} onToggleMixer={() => setMixerOpen((o) => !o)}
-        syncOpen={sync.open} onToggleSync={mode === 'media' ? () => setSync((s) => ({ open: !s.open, autoRun: false })) : undefined} />
-      <input ref={fileInput} type="file" accept="audio/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void onPickFile(f); e.target.value = ''; }} />
-    </div>
+      <BottomBar controller={controller} view={view} onView={setView} zoom={zoom} onZoom={setZoom}
+        mixerOpen={mixerOpen} onToggleMixer={() => setMixerOpen((o) => !o)}
+        syncOpen={sync.open} onToggleSync={mode === 'media' ? () => setSync((s) => ({ open: !s.open, autoRun: false })) : undefined}
+        onToggleTracks={() => setTracksOpen((o) => !o)} barLabel={barLabel} />
+    </>
   );
 }

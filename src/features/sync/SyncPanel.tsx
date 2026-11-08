@@ -8,10 +8,11 @@ import { repo } from '@/app/repo';
 import type { Song, SyncPoint } from '@/data/types';
 import type { PlayerController } from '@/features/player/PlayerController';
 import { usePlayer } from '@/features/player/playerStore';
-import { fmtTime } from '@/features/player/TransportBar';
+import { fmtTime } from '@/features/player/BottomBar';
 import { decodeForAnalysis, runAutoSync, waveformPeaks, type Peaks } from '@/sync/runAutoSync';
 import { createSyncMap, pinSyncPoint, shiftSyncPoints } from '@/sync/syncMap';
 import { useHistory } from './useHistory';
+import { useSettings } from '@/store/settings';
 
 interface Props {
   song: Song;
@@ -51,6 +52,7 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   const pointers = useRef(new Map<number, number>());
   const pinch = useRef<{ dist: number; msPerPx: number } | null>(null);
   const positionMs = usePlayer((s) => s.positionMs);
+  const theme = useSettings((s) => s.theme); // redraw the canvas when the theme changes
   // re-render when the controller has loaded the score (it's a mutable object)
   const scoreVersion = usePlayer((s) => s.scoreVersion);
   const tl = controller.scoreTimeline;
@@ -95,6 +97,10 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   }, [tl, points, scoreVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    // draw on the next frame: a theme change applies its CSS class after this effect runs
+    const raf = requestAnimationFrame(() => draw());
+    return () => cancelAnimationFrame(raf);
+    function draw() {
     const c = canvas.current;
     if (!c) return;
     const dpr = window.devicePixelRatio || 1;
@@ -144,7 +150,8 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
     // playhead
     g.fillStyle = col('--c-danger');
     g.fillRect(toX(positionMs) - 1, 0, 2, WAVE_H + BARS_H);
-  }, [width, peaks, view, barTimes, positionMs, recording, toMs, toX]);
+    }
+  }, [width, peaks, view, barTimes, positionMs, recording, toMs, toX, theme]);
 
   // keep the playhead in view while playing
   useEffect(() => {

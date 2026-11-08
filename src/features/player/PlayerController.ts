@@ -204,6 +204,16 @@ export class PlayerController {
     usePlayer.getState().setChannel(id, { solo });
   }
 
+  /** Mute/solo a score part: its backing track (recording mode) or its synth track (no recording). */
+  setPartMuted(trackIndex: number, muted: boolean, stemIds: string[]): void {
+    if (this.engine) stemIds.forEach((id) => this.setMuted(id, muted));
+    else { const t = this.api?.score?.tracks[trackIndex]; if (t) this.api?.changeTrackMute([t], muted); }
+  }
+  setPartSolo(trackIndex: number, solo: boolean, stemIds: string[]): void {
+    if (this.engine) stemIds.forEach((id) => this.setSolo(id, solo));
+    else { const t = this.api?.score?.tracks[trackIndex]; if (t) this.api?.changeTrackSolo([t], solo); }
+  }
+
   // ---- clock → cursor ---------------------------------------------------------------------------
   private onEngineState(s: EngineState): void {
     usePlayer.setState({ state: s, ...(s !== 'counting-in' ? { countIn: null } : {}) });
