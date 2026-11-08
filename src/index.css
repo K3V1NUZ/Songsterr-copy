@@ -95,3 +95,21 @@ body {
 input[type='range'] {
   accent-color: var(--c-ink-2);
 }
+
+/* alphaTab playback cursor and selections (alphaTab positions these; we only style them) */
+.at-cursor-beat {
+  width: 2px;
+  margin-left: -1px;
+  background: var(--c-accent);
+  border-radius: 1px;
+}
+.at-cursor-bar {
+  background: color-mix(in srgb, var(--c-accent) 6%, transparent);
+}
+.at-highlight * {
+  fill: var(--c-accent);
+  stroke: var(--c-accent);
+}
+.at-selection div {
+  background: color-mix(in srgb, var(--c-loop) 14%, transparent);
+}
