@@ -112,7 +112,15 @@ export function PlayerPage() {
     return () => controller.attach(null);
   }, [controller, api]);
   const onApi = useCallback((a: AlphaTabApi | null) => setApi(a), []);
-  useShortcuts(controller);
+  useShortcuts(controller, {
+    trackCount: song?.parts.length ?? 0,
+    selectTrack: (i) => { const part = song?.parts[i]; if (part) setTrackIndex(part.trackIndex); },
+    nextTrack: () => {
+      if (!song?.parts.length) return;
+      const k = song.parts.findIndex((p) => p.trackIndex === trackIndex);
+      setTrackIndex(song.parts[(k + 1) % song.parts.length]!.trackIndex);
+    },
+  });
 
   const onPickFile = async (file: File) => {
     if (!song || !controller) return;

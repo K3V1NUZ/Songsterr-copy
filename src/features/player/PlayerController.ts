@@ -229,6 +229,43 @@ export class PlayerController {
     }
   }
 
+  /** Jumps `delta` bars forward/back from the current position (in played order). */
+  seekBars(delta: number): void {
+    if (!this.timeline || !this.syncMap) return;
+    const now = this.engine ? this.engine.positionMs() : (this.api?.timePosition ?? 0);
+    const loc = this.syncMap.locate(now);
+    // "back" from the middle of a bar first goes to that bar's start
+    const target = delta < 0 && loc.barPosition > 0.15 ? loc.playedIndex + delta + 1 : loc.playedIndex + delta;
+    const p = this.timeline.played[Math.max(0, Math.min(this.timeline.played.length - 1, target))]!;
+    if (this.engine) this.seek(Math.max(0, this.syncMap.beatToMs(p.startBeat)));
+    else if (this.api) this.api.tickPosition = p.startBeat * TICKS_PER_QUARTER;
+  }
+
+  /** Replaces the sync points live: alphaTab's cursor, the metronome and loops follow at once. */
+  setSyncPoints(points: SyncPoint[]): void {
+    this.syncPoints = points;
+    const score = this.api?.score;
+    if (score) {
+      score.applyFlatSyncPoints(points);
+      this.api?.updateSyncPoints();
+    }
+    if (this.timeline) this.syncMap = createSyncMap(this.timeline, points);
+    this.updateClicks();
+    const loop = usePlayer.getState().loop;
+    if (loop && this.api?.playbackRange) this.onRange(this.api.playbackRange);
+    if (this.engine) this.pushPosition(this.engine.positionMs());
+  }
+
+  get scoreTimeline(): Timeline | null {
+    return this.timeline;
+  }
+  get currentSyncMap(): SyncMap | null {
+    return this.syncMap;
+  }
+  get alphaTab(): AlphaTabApi | null {
+    return this.api;
+  }
+
   /** Snapshot for tests/debugging: recording ms, alphaTab's cursor tick, and our own mapping. */
   debugState() {
     const ms = this.engine ? this.engine.positionMs() : (this.api?.timePosition ?? 0);
