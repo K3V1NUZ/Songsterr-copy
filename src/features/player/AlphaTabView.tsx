@@ -2,7 +2,8 @@
 // In 'media' mode alphaTab is driven by our Web Audio engine (external media);
 // in 'synth' mode alphaTab plays the score itself (no recording attached).
 import { useEffect, useRef } from 'react';
-import { AlphaTabApi, LayoutMode, model, NotationElement, PlayerMode, ScrollMode, Settings, StaveProfile } from '@coderline/alphatab';
+import { AlphaTabApi, LayoutMode, model, NotationElement, PlayerMode, ScrollMode, Settings, StaveProfile, TabRhythmMode } from '@coderline/alphatab';
+import { patchTabStems, styleScore } from './alphaTabTweaks';
 
 export type ScoreView = 'tab' | 'tab+score' | 'score';
 export type AudioMode = 'media' | 'synth';
@@ -31,9 +32,18 @@ function applyThemeColors(settings: Settings): void {
   r.staffLineColor = color('--c-line');
   r.barSeparatorColor = color('--c-ink-2');
   r.barNumberColor = color('--c-muted');
+  // tuning letters beside the strings: plain UI font instead of italic serif
+  const sans = css.getPropertyValue('--font-sans').split(',').map((f) => f.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+  r.elementFonts.set(NotationElement.GuitarTuning, model.Font.withFamilyList(sans.length ? sans : ['Arial', 'sans-serif'], 12));
+  r.elementFonts.set(NotationElement.BarNumber, model.Font.withFamilyList(sans.length ? sans : ['Arial', 'sans-serif'], 10));
 }
 
+/** Zoom 100 % draws the notation this much larger than alphaTab's default (less on phones). */
+const baseScale = () => (window.matchMedia('(max-width: 767px)').matches ? 1 : 1.5);
+
 const PROFILE = { tab: StaveProfile.Tab, 'tab+score': StaveProfile.ScoreTab, score: StaveProfile.Score } as const;
+// rhythm under the tab only when there is no standard notation showing it already
+const RHYTHM = { tab: TabRhythmMode.ShowWithBars, 'tab+score': TabRhythmMode.Hidden, score: TabRhythmMode.Hidden } as const;
 const PLAYER_MODE = { media: PlayerMode.EnabledExternalMedia, synth: PlayerMode.EnabledSynthesizer } as const;
 
 export function AlphaTabView({ data, trackIndex, view, zoom, mode, scrollElement, onApi, onScoreLoaded, onError }: AlphaTabViewProps) {
@@ -45,13 +55,17 @@ export function AlphaTabView({ data, trackIndex, view, zoom, mode, scrollElement
   // one API per mount; settings changes are applied by the effects below
   useEffect(() => {
     if (!host.current) return;
+    patchTabStems();
     const settings = new Settings();
+    // render on the main thread so the engraving tweaks apply (scores here are small)
+    settings.core.useWorkers = false;
     // the Vite plugin copies these to /font and /soundfont (not next to the alphaTab script)
     settings.core.fontDirectory = `${import.meta.env.BASE_URL}font/`;
     settings.core.includeNoteBounds = true;
     settings.display.layoutMode = LayoutMode.Page;
     settings.display.staveProfile = PROFILE[view];
-    settings.display.scale = zoom;
+    settings.display.scale = zoom * baseScale();
+    settings.notation.rhythmMode = RHYTHM[view];
     settings.player.soundFont = `${import.meta.env.BASE_URL}soundfont/sonivox.sf2`;
     settings.player.playerMode = PLAYER_MODE[mode];
     settings.player.enableCursor = true;
@@ -65,12 +79,13 @@ export function AlphaTabView({ data, trackIndex, view, zoom, mode, scrollElement
     if (scrollElement) settings.player.scrollElement = scrollElement;
     // the page shows its own title/artist header; keep only the music
     for (const el of [NotationElement.ScoreTitle, NotationElement.ScoreSubTitle, NotationElement.ScoreArtist, NotationElement.ScoreAlbum,
-      NotationElement.ScoreWords, NotationElement.ScoreMusic, NotationElement.ScoreWordsAndMusic, NotationElement.ScoreCopyright]) {
+      NotationElement.ScoreWords, NotationElement.ScoreMusic, NotationElement.ScoreWordsAndMusic, NotationElement.ScoreCopyright,
+      NotationElement.TrackNames]) {
       settings.notation.elements.set(el, false);
     }
     applyThemeColors(settings);
     const a = new AlphaTabApi(host.current, settings);
-    a.scoreLoaded.on((score) => callbacks.current.onScoreLoaded?.(score));
+    a.scoreLoaded.on((score) => { styleScore(score); callbacks.current.onScoreLoaded?.(score); });
     a.error.on((e) => callbacks.current.onError?.(e.message));
     const themeObserver = new MutationObserver(() => {
       applyThemeColors(a.settings);
@@ -100,7 +115,8 @@ export function AlphaTabView({ data, trackIndex, view, zoom, mode, scrollElement
     const a = api.current;
     if (!a || !a.score) return;
     a.settings.display.staveProfile = PROFILE[view];
-    a.settings.display.scale = zoom;
+    a.settings.display.scale = zoom * baseScale();
+    a.settings.notation.rhythmMode = RHYTHM[view];
     a.updateSettings();
     a.render();
   }, [view, zoom]);

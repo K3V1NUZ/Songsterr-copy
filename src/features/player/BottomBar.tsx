@@ -26,6 +26,7 @@ interface Props {
   syncOpen: boolean;
   /** Only in recording mode. */
   onToggleSync?: () => void;
+  tracksOpen: boolean;
   onToggleTracks: () => void;
   barLabel: string;
 }
@@ -59,7 +60,7 @@ export function BottomBar(p: Props) {
         <div className="absolute top-1 left-0 h-[2px] bg-accent group-hover:h-1" style={{ width: `${Math.min(100, (s.positionMs / dur) * 100)}%` }} />
       </div>
 
-      <IconButton icon="sidebar" label="Instruments" className="md:hidden" onClick={p.onToggleTracks} />
+      <IconButton icon="sidebar" label="Instruments" active={p.tracksOpen} onClick={p.onToggleTracks} />
       <IconButton icon="prev" label="Back to start (Home)" onClick={() => controller.seek(0)} disabled={!s.ready} className="max-sm:hidden" />
       <button type="button" onClick={() => controller.toggle()} disabled={!s.ready} aria-label={playing ? 'Pause' : 'Play'}
         className="mx-1 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-play text-on-play disabled:opacity-40">

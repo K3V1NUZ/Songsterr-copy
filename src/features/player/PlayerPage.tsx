@@ -16,6 +16,8 @@ import { PlayerController } from './PlayerController';
 import { usePlayer } from './playerStore';
 import { useShortcuts } from './useShortcuts';
 
+const isPhone = () => window.matchMedia('(max-width: 767px)').matches;
+
 export function PlayerPage() {
   const { id = '' } = useParams();
   const location = useLocation();
@@ -28,7 +30,7 @@ export function PlayerPage() {
   const [controller, setController] = useState<PlayerController>();
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
   const [mixerOpen, setMixerOpen] = useState(false);
-  const [tracksOpen, setTracksOpen] = useState(false); // phones only
+  const [tracksOpen, setTracksOpen] = useState(false);
   const [sync, setSync] = useState<{ open: boolean; autoRun: boolean }>({ open: false, autoRun: false });
   const [recording, setRecording] = useState<Blob | null>(null);
   const [api, setApi] = useState<AlphaTabApi | null>(null);
@@ -159,15 +161,15 @@ export function PlayerPage() {
   return (
     <>
       <div className="relative flex min-h-0 flex-1">
-        {/* instruments: docked on desktop, sliding in on phones */}
+        {/* instruments: hidden until opened from the bottom bar; docked on desktop, sliding in on phones */}
         <aside className={cx('z-20 w-56 shrink-0 overflow-y-auto border-r border-line bg-surface py-2',
-          'max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:shadow-xl', !tracksOpen && 'max-md:hidden')}>
+          'max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:shadow-xl', !tracksOpen && 'hidden')}>
           {active.parts.map((p) => (
             <TrackItem key={p.id} name={p.name} icon={instrumentIcon(p.instrument)}
               detail={[p.instrument, p.tuning].filter(Boolean).join(' · ')}
               selected={p.trackIndex === trackIndex}
               muted={partState[p.trackIndex]?.muted} solo={partState[p.trackIndex]?.solo}
-              onSelect={() => { setTrackIndex(p.trackIndex); setTracksOpen(false); }}
+              onSelect={() => { setTrackIndex(p.trackIndex); if (isPhone()) setTracksOpen(false); }}
               onToggleMute={partToggle(p.trackIndex, p.id, 'muted')} onToggleSolo={partToggle(p.trackIndex, p.id, 'solo')} />
           ))}
         </aside>
@@ -205,7 +207,7 @@ export function PlayerPage() {
           onAutoDone={(confidence) => { if (confidence >= 0.6 && sync.autoRun) setSync({ open: false, autoRun: false }); }}
           onClose={() => setSync({ open: false, autoRun: false })} />
       )}
-      <BottomBar controller={controller} view={view} onView={setView} zoom={zoom} onZoom={setZoom}
+      <BottomBar tracksOpen={tracksOpen} controller={controller} view={view} onView={setView} zoom={zoom} onZoom={setZoom}
         mixerOpen={mixerOpen} onToggleMixer={() => setMixerOpen((o) => !o)}
         syncOpen={sync.open} onToggleSync={mode === 'media' ? () => setSync((s) => ({ open: !s.open, autoRun: false })) : undefined}
         onToggleTracks={() => setTracksOpen((o) => !o)} barLabel={barLabel} />
