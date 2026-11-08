@@ -193,7 +193,9 @@ export function estimateOffsetAndRatio(env: Float32Array, tl: Timeline, events: 
   const coarse = bestOf(blurred, coarseOnsets, ratios, oMin, oMax, 2);
 
   const firstMs = all[0]!.ms;
-  const head = all.filter((o) => o.ms < firstMs + 12000);
+  // the opening matters most for *where bar 1 is*: later onsets count less, so a tempo that
+  // already drifts in the first seconds can't pull the start point off
+  const head = all.filter((o) => o.ms < firstMs + 12000).map((o) => ({ ms: o.ms, w: o.w * Math.exp(-(o.ms - firstMs) / 3000) }));
   const fineRatios: number[] = [];
   for (let r = coarse.ratio - priorRatio * 0.03; r <= coarse.ratio + priorRatio * 0.03 + 1e-9; r += priorRatio * 0.002) fineRatios.push(r);
   const span = Math.round(0.4 * ONSET_FPS);
@@ -208,7 +210,8 @@ export function estimateOffsetAndRatio(env: Float32Array, tl: Timeline, events: 
   for (const v of sc) varSum += (v - mean) ** 2;
   const sd = Math.sqrt(varSum / (sc.length || 1)) || 1;
   const z = (coarse.score - mean) / sd;
-  return { offsetMs: (fine.o / ONSET_FPS) * 1000, ratio: coarse.ratio, confidence: Math.max(0, Math.min(1, (z - 2) / 4)) };
+  // the fine offset belongs with the fine ratio (the opening's tempo), not the whole-song one
+  return { offsetMs: (fine.o / ONSET_FPS) * 1000, ratio: fine.ratio, confidence: Math.max(0, Math.min(1, (z - 2) / 4)) };
 }
 
 // ---- step 2: chroma + DTW ------------------------------------------------------------------------
@@ -355,12 +358,15 @@ function trackBars(env: Float32Array, tl: Timeline, onsets: Array<Array<[number,
   for (let k = from; k < n; k++) {
     const p = tl.played[k]!;
     // onsets of this bar and the next, relative to this bar's start (score ms)
-    const pts: Array<[number, number]> = [...onsets[k]!];
-    if (k + 1 < n) for (const [rel, w] of onsets[k + 1]!) pts.push([p.durationMs + rel, w * 0.6]);
+    // onsets near the bar start decide where the bar starts; later ones (which a slightly
+    // wrong tempo would pull) count less
+    const near = (rel: number, w: number): [number, number] => [rel, w * Math.exp(-rel / (0.6 * p.durationMs))];
+    const pts: Array<[number, number]> = onsets[k]!.map(([rel, w]) => near(rel, w));
+    if (k + 1 < n) for (const [rel, w] of onsets[k + 1]!) pts.push(near(p.durationMs + rel, w));
     let best = { score: -1, s: 0, q: r };
     let total = 0, count = 0;
     if (pts.length) {
-      for (const qf of [0.97, 0.985, 1, 1.015, 1.03]) {
+      for (const qf of [0.97, 0.98, 0.99, 1, 1.01, 1.02, 1.03]) {
         const q = r * qf;
         for (let s = -S; s <= S; s++) {
           let sc = 0;
