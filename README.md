@@ -37,11 +37,11 @@ src/
   features/       library/, player/ (and later upload/, sync/)
   lib/            score format detection + metadata via alphaTab
   store/          Zustand stores (settings)
-  sync/           pure sync math: play order, timeline, sync points <-> time
+  sync/           sync engine: play order, timeline, onset/beat tracking auto-sync (docs/SYNC_ENGINE.md)
   index.css       Tailwind + design tokens (light/dark)
 tests/            Vitest tests + fixtures (GP3–GP7, MusicXML)
 public/samples/   two example scores (Greensleeves and an original demo riff)
-docs/             AI conversion prompt (MusicXML cheat sheet)
+docs/             AI conversion prompt (MusicXML cheat sheet), sync engine design
 ```
 
 All storage goes through `SongRepository`; a Supabase implementation can replace the local one

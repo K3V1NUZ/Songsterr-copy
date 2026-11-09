@@ -12,7 +12,8 @@ import type { Song, TempoMark } from '@/data/types';
 import type { PlayerController } from '@/features/player/PlayerController';
 import { usePlayer } from '@/features/player/playerStore';
 import { fmtTime } from '@/features/player/BottomBar';
-import { decodeForAnalysis, runAutoSync, waveformPeaks, type Peaks } from '@/sync/runAutoSync';
+import { decodeForAnalysis, waveformPeaks, type Peaks } from '@/sync/decode';
+import { runAutoSync } from '@/sync/runAutoSync';
 import { createSyncMap } from '@/sync/syncMap';
 import {
   addMark, layoutMarks, markAt, markIndex, marksFromSyncPoints, MAX_BPM, MIN_BPM, moveMark, removeMark, setMarkBpm, setMarkSignature, shiftMarks,
@@ -413,9 +414,10 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
       onSongChange(saved);
       history.reset(next);
       setSelected(0);
-      setMessage(res.confidence >= 0.6
+      const notes = res.warnings.map((w) => ` ${w.detail}`).join('');
+      setMessage((res.confidence >= 0.6
         ? `Synced automatically (confidence ${Math.round(res.confidence * 100)} %). Play it to check.`
-        : `Auto-sync isn't sure (confidence ${Math.round(res.confidence * 100)} %). Drag bar 1 to where the song starts, then add tempo marks where it speeds up or slows down.`);
+        : `Auto-sync isn't sure (confidence ${Math.round(res.confidence * 100)} %). Drag bar 1 to where the song starts, then add tempo marks where it speeds up or slows down.`) + notes);
       onAutoDone?.(res.confidence);
       const first = next[0];
       if (first) setView((v) => ({ ...v, startMs: Math.max(-1000, first.millisecondOffset - 2000) }));

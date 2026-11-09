@@ -1,64 +1,36 @@
-// Main-thread side of auto-sync: decode + resample the recording, then run the
-// analysis in a Web Worker. Also builds waveform peaks for the manual sync tool.
+// Main-thread side of auto-sync: decode the recording, build the score's beats, run the analysis in
+// sync.worker.ts and turn the anchors into the sync points the player uses.
 import type { model } from '@coderline/alphatab';
-import type { AutoSyncResult } from './analysis';
-import { ANALYSIS_RATE } from './analysis';
+import type { SyncPoint } from '@/data/types';
+import { decodeForAnalysis } from './decode';
+import { SAMPLE_RATE } from './onset';
+import type { Stage } from './pipeline';
+import { anchorsToSyncPoints, scoreBeats, scoreOnsets } from './scoreBeats';
 import { scoreNoteEvents } from './scoreEvents';
+import type { AnalyzeRequest, WorkerMessage } from './sync.worker';
 import type { Timeline } from './timeline';
-import type { AutoSyncMessage } from '@/workers/autosync.worker';
+import type { Anchor, SyncWarning } from './types';
 
-export interface DecodedAudio {
-  /** Mono PCM at ANALYSIS_RATE. */
-  pcm: Float32Array;
-  durationMs: number;
+export interface AutoSyncResult {
+  anchors: Anchor[];
+  syncPoints: SyncPoint[];
+  /** 0..1 */
+  confidence: number;
+  warnings: SyncWarning[];
+  /** Local tempo at each score beat (beats per minute). */
+  localBpm: number[];
 }
 
-const cache = new WeakMap<Blob, Promise<DecodedAudio>>();
+const STAGES: Record<Stage, [number, number, string]> = {
+  onset: [0.1, 0.6, 'Finding note onsets'],
+  tempo: [0.6, 0.75, 'Measuring the tempo'],
+  beats: [0.75, 0.9, 'Tracking the beats'],
+  align: [0.9, 1, 'Lining up the score'],
+};
 
-/** Decodes a recording to mono at the analysis rate (cached per Blob). */
-export function decodeForAnalysis(blob: Blob): Promise<DecodedAudio> {
-  let p = cache.get(blob);
-  if (!p) {
-    p = (async () => {
-      const bytes = await blob.arrayBuffer();
-      const decoded = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(bytes);
-      const length = Math.ceil(decoded.duration * ANALYSIS_RATE);
-      const ctx = new OfflineAudioContext(1, length, ANALYSIS_RATE); // 1 channel: the browser down-mixes
-      const src = ctx.createBufferSource();
-      src.buffer = decoded;
-      src.connect(ctx.destination);
-      src.start();
-      const rendered = await ctx.startRendering();
-      return { pcm: rendered.getChannelData(0).slice(), durationMs: decoded.duration * 1000 };
-    })();
-    cache.set(blob, p);
-  }
-  return p;
-}
-
-export interface Peaks {
-  /** Max |sample| per bucket, 0..1. */
-  data: Float32Array;
-  /** Milliseconds per bucket. */
-  bucketMs: number;
-}
-
-/** Waveform peaks at 5 ms resolution, normalised. */
-export function waveformPeaks(audio: DecodedAudio, bucketMs = 5): Peaks {
-  const per = Math.max(1, Math.round((ANALYSIS_RATE * bucketMs) / 1000));
-  const n = Math.ceil(audio.pcm.length / per);
-  const data = new Float32Array(n);
-  let max = 0;
-  for (let i = 0; i < n; i++) {
-    let m = 0;
-    for (let j = i * per; j < Math.min(audio.pcm.length, (i + 1) * per); j++) m = Math.max(m, Math.abs(audio.pcm[j]!));
-    data[i] = m;
-    max = Math.max(max, m);
-  }
-  if (max > 0) for (let i = 0; i < n; i++) data[i]! /= max;
-  return { data, bucketMs: (per / ANALYSIS_RATE) * 1000 };
-}
-
+/**
+ * @param bpm the recording's BPM entered by the user (quarter notes per minute); 0 = the score's tempo
+ */
 export async function runAutoSync(
   blob: Blob,
   score: model.Score,
@@ -68,21 +40,37 @@ export async function runAutoSync(
 ): Promise<AutoSyncResult> {
   onProgress(0, 'Decoding the recording');
   const audio = await decodeForAnalysis(blob);
-  const events = scoreNoteEvents(score, timeline);
-  const worker = new Worker(new URL('../workers/autosync.worker.ts', import.meta.url), { type: 'module' });
+  const beats = scoreBeats(timeline);
+  const onsets = scoreOnsets(beats, scoreNoteEvents(score, timeline));
+  const writtenBpm = timeline.played[0]?.segments[0]?.bpm ?? 120;
+  const tempoScale = bpm > 0 ? bpm / writtenBpm : 1;
+
+  const worker = new Worker(new URL('./sync.worker.ts', import.meta.url), { type: 'module' });
+  const warnings: SyncWarning[] = [];
   try {
-    return await new Promise<AutoSyncResult>((resolve, reject) => {
-      worker.onmessage = (e: MessageEvent<AutoSyncMessage>) => {
+    const res = await new Promise<Extract<WorkerMessage, { type: 'result' }>>((resolve, reject) => {
+      worker.onmessage = (e: MessageEvent<WorkerMessage>) => {
         const m = e.data;
-        if (m.type === 'progress') onProgress(m.fraction, m.stage);
-        else if (m.type === 'done') resolve(m.result);
+        if (m.type === 'progress') {
+          const [a, b, text] = STAGES[m.stage];
+          onProgress(a + (b - a) * m.pct, text);
+        } else if (m.type === 'warning') warnings.push({ code: m.code, detail: m.detail });
+        else if (m.type === 'result') resolve(m);
         else reject(new Error(m.message));
       };
       worker.onerror = (e) => reject(new Error(e.message || 'Auto-sync worker failed'));
-      // copy the PCM: the decoded audio stays cached for the waveform
-      const pcm = audio.pcm.slice();
-      worker.postMessage({ pcm, timeline, events, bpm }, [pcm.buffer]);
+      // copy the samples: the decoded audio stays cached for the waveform lane
+      const samples = audio.samples.slice();
+      const req: AnalyzeRequest = { type: 'analyze', samples, sampleRate: SAMPLE_RATE, scoreBeats: beats, onsets, tempoScale, lockedAnchors: [] };
+      worker.postMessage(req, [samples.buffer]);
     });
+    return {
+      anchors: res.anchors,
+      syncPoints: anchorsToSyncPoints(timeline, beats, res.anchors),
+      confidence: res.confidence,
+      warnings,
+      localBpm: res.localBpm,
+    };
   } finally {
     worker.terminate();
   }
