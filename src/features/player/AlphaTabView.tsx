@@ -54,6 +54,22 @@ function applyThemeColors(settings: Settings): void {
 const baseScale = () => (window.matchMedia('(max-width: 767px)').matches ? 1 : 1.5);
 
 const PROFILE = { tab: StaveProfile.Tab, 'tab+score': StaveProfile.ScoreTab, score: StaveProfile.Score } as const;
+
+/**
+ * The view to draw a track in: parts without tablature (drums, piano, voice, sheet music without
+ * tab) can't be drawn as tab only — alphaTab would have nothing to draw and fail — so they show notes.
+ */
+function viewFor(track: model.Track | undefined, view: ScoreView): ScoreView {
+  const hasTab = !!track?.staves.some((s) => s.isStringed && !s.isPercussion);
+  return view === 'tab' && !hasTab ? 'score' : view;
+}
+
+/** Applies the (effective) view of the track to alphaTab's settings. */
+function applyView(a: AlphaTabApi, track: model.Track | undefined, view: ScoreView): void {
+  const v = viewFor(track, view);
+  a.settings.display.staveProfile = PROFILE[v];
+  a.settings.notation.rhythmMode = RHYTHM[v];
+}
 // rhythm under the tab only when there is no standard notation showing it already
 const RHYTHM = { tab: TabRhythmMode.ShowWithBars, 'tab+score': TabRhythmMode.Hidden, score: TabRhythmMode.Hidden } as const;
 const PLAYER_MODE = { media: PlayerMode.EnabledExternalMedia, synth: PlayerMode.EnabledSynthesizer } as const;
@@ -133,6 +149,8 @@ export function AlphaTabView({ data, trackIndex, view, zoom, barsPerRow, mode, t
     try {
       const { score, order } = unrollRepeats(importer.ScoreLoader.loadScoreFromBytes(data, a.settings), a.settings);
       callbacks.current.onUnrolled?.(order);
+      applyView(a, score.tracks[trackIndex] ?? score.tracks[0], view);
+      a.updateSettings();
       a.renderScore(score, [trackIndex]);
     } catch (e) {
       callbacks.current.onError?.(`Could not read the score: ${e instanceof Error ? e.message : String(e)}`);
@@ -142,19 +160,21 @@ export function AlphaTabView({ data, trackIndex, view, zoom, barsPerRow, mode, t
   useEffect(() => {
     const a = api.current;
     const track = a?.score?.tracks[trackIndex];
-    if (a && track) a.renderTracks([track]);
-  }, [trackIndex]);
+    if (!a || !track) return;
+    applyView(a, track, view);
+    a.updateSettings();
+    a.renderTracks([track]);
+  }, [trackIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const a = api.current;
     if (!a || !a.score) return;
-    a.settings.display.staveProfile = PROFILE[view];
+    applyView(a, a.score.tracks[trackIndex], view);
     a.settings.display.scale = zoom * baseScale();
-    a.settings.notation.rhythmMode = RHYTHM[view];
     a.settings.display.barsPerRow = barsPerRow === 'auto' ? -1 : barsPerRow;
     a.updateSettings();
     a.render();
-  }, [view, zoom, barsPerRow]);
+  }, [view, zoom, barsPerRow]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return <div ref={host} className="min-h-[50vh] select-none" />;
 }
