@@ -192,15 +192,12 @@ export function countPattern([n, d]: [number, number]): { stepQuarters: number; 
 }
 
 /** Metronome click positions for the whole timeline. */
-export function metronomeClicks(tl: Timeline, barLengths?: Map<number, [number, number]>): Click[] {
+export function metronomeClicks(tl: Timeline): Click[] {
   const out: Click[] = [];
   for (const p of tl.played) {
-    // a bar played with another length (see tempo marks) clicks in that signature, spread over the bar
-    const sig = barLengths?.get(p.index);
-    const quarters = sig ? (sig[0] * 4) / sig[1] : p.quarters;
-    const { stepQuarters, count } = countPattern(sig ?? p.timeSignature);
-    for (let i = 0; i < count && i * stepQuarters < quarters - 1e-9; i++) {
-      out.push({ beat: p.startBeat + ((i * stepQuarters) / quarters) * p.quarters, accent: i === 0, played: p.index });
+    const { stepQuarters, count } = countPattern(p.timeSignature);
+    for (let i = 0; i < count && i * stepQuarters < p.quarters - 1e-9; i++) {
+      out.push({ beat: p.startBeat + i * stepQuarters, accent: i === 0, played: p.index });
     }
   }
   return out;

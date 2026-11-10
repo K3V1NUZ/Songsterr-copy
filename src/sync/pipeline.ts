@@ -1,6 +1,7 @@
 // The whole auto-sync analysis as one pure function: onset -> tempo -> beatTracker -> align.
 // Runs inside sync.worker.ts in the app and directly in unit tests.
 import { align } from './align';
+import { fitToLocks } from './anchors';
 import { localBpm, trackBeats } from './beatTracker';
 import { onsetCurve, SAMPLE_RATE } from './onset';
 import { periodCurve, refineSections, tempoSections, type TempoSection } from './tempo';
@@ -16,6 +17,8 @@ export interface AnalyzeInput {
   tempoScale?: number;
   /** Beat tracker tightness (α). */
   tightness?: number;
+  /** Manual anchors: kept exactly, the analysis only fills in the beats between them (docs §8). */
+  lockedAnchors?: Anchor[];
 }
 
 export interface AnalyzeResult {
@@ -38,13 +41,13 @@ function firstOnsetFrame(curve: Float32Array): number {
   return 0;
 }
 
-function sectionOf(sections: TempoSection[], j: number): TempoSection {
+function sectionIndex(sections: TempoSection[], j: number): number {
   let lo = 0, hi = sections.length - 1;
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1;
     if (sections[mid]!.startBeat <= j) lo = mid; else hi = mid - 1;
   }
-  return sections[lo]!;
+  return lo;
 }
 
 export function analyze(input: AnalyzeInput, progress: ProgressFn = () => {}): AnalyzeResult {
@@ -66,20 +69,27 @@ export function analyze(input: AnalyzeInput, progress: ProgressFn = () => {}): A
   progress('beats', 1);
 
   progress('align', 0);
+  const scale = input.tempoScale ?? 1;
+  const locked = (input.lockedAnchors ?? []).filter((a) => a.source === 'manual');
   const res = align({
-    beats, onsets: input.onsets, detected, curve,
-    periodOf: (j) => 60 / sectionOf(sections, j).bpm,
+    beats, onsets: input.onsets, detected, curve, locked,
+    // the beat's written length, sped up or slowed down like its tempo section
+    periodOf: (j) => {
+      const k = sectionIndex(sections, j);
+      return (beats[Math.max(0, Math.min(beats.length - 1, j))]!.seconds / scale) * (hinted[k]!.bpm / sections[k]!.bpm);
+    },
   });
-  if (res.ambiguousStart) {
+  const anchors = fitToLocks(res.anchors, locked);
+  if (res.ambiguousStart && !locked.length) {
     warnings.push({ code: 'LOW_CONFIDENCE_START', detail: 'Not sure where bar 1 starts in the recording. Please check it.' });
   }
   // mostly: are the score's notes heard where the anchors put them? (wrong audio scores low)
-  const meanAnchor = res.anchors.reduce((s, a) => s + a.confidence, 0) / (res.anchors.length || 1);
-  const confidence = Math.max(0, Math.min(1, 0.8 * res.noteFit + 0.2 * meanAnchor - (res.ambiguousStart ? 0.1 : 0)));
+  const meanAnchor = anchors.reduce((s, a) => s + a.confidence, 0) / (anchors.length || 1);
+  const confidence = Math.max(0, Math.min(1, 0.8 * res.noteFit + 0.2 * meanAnchor - (res.ambiguousStart && !locked.length ? 0.1 : 0)));
   progress('align', 1);
   return {
-    anchors: res.anchors,
-    localBpm: localBpm(res.anchors.map((a) => a.time)),
+    anchors,
+    localBpm: localBpm(anchors.map((a) => a.time)),
     warnings,
     confidence: Math.round(confidence * 100) / 100,
     detected: detected.map((d) => d.time),

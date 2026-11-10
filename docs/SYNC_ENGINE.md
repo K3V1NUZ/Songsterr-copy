@@ -381,19 +381,35 @@ Anchors are small: 600 beats × about 40 bytes ≈ 24 KB per song, so `jsonb` is
 
 ## Implementation status
 
-| Step | State | Where |
-|------|-------|-------|
-| 1 `types`, `timeMap` | done; the time map is the existing `syncMap.ts` (alphaTab sync points) | `src/sync/types.ts`, `src/sync/syncMap.ts` |
-| 2 `scoreBeats` | done; repeats come unrolled from alphaTab's play order (`timeline.ts`) | `src/sync/scoreBeats.ts` |
-| 3 Manual lanes + storage | existing tempo-mark lanes and Dexie storage; auto-sync anchors are turned into sync points (one per bar) for them | `src/features/sync/SyncPanel.tsx`, `src/data/` |
-| 4 `decode`, `fft`, `onset` | done | `src/sync/decode.ts`, `fft.ts`, `onset.ts` |
-| 5 `tempo`, `beatTracker` | done, click-track tests pass | `src/sync/tempo.ts`, `beatTracker.ts` |
-| 6 `align` | done, synthetic Greensleeves syncs end to end | `src/sync/align.ts` |
-| 7 `sync.worker`, progress UI | done | `src/sync/sync.worker.ts`, `runAutoSync.ts`, `pipeline.ts` |
-| 8 Supabase push | not started | |
+All eight build steps are done.
+
+| Step | Where |
+|------|-------|
+| 1 `types`, `timeMap` | `src/sync/types.ts`, `src/sync/timeMap.ts`. The player itself keeps using alphaTab sync points (`syncMap.ts`), derived from the anchors, one per beat. |
+| 2 `scoreBeats` | `src/sync/scoreBeats.ts`; repeats come unrolled from alphaTab's play order (`timeline.ts`) |
+| 3 Manual lanes + storage | `src/features/sync/SyncPanel.tsx` (edits anchors), `src/sync/anchors.ts` (the edit math), `src/features/sync/syncState.ts` (load/save) |
+| 4 `decode`, `fft`, `onset` | `src/sync/decode.ts`, `fft.ts`, `onset.ts` |
+| 5 `tempo`, `beatTracker` | `src/sync/tempo.ts`, `beatTracker.ts` |
+| 6 `align` | `src/sync/align.ts` |
+| 7 `sync.worker`, progress UI | `src/sync/sync.worker.ts`, `pipeline.ts`, `runAutoSync.ts` |
+| 8 Supabase push | `src/sync/storage.ts`, `supabase/migrations/0001_song_sync.sql` |
+
+How the pieces fit:
+- **Anchors are the source of truth.** They are stored as `SyncData` in their own IndexedDB table (`sync`). The `Song` keeps the alphaTab sync points derived from them, plus the source and confidence for the library.
+- **Older songs** (synced with sync points or tempo marks) are turned into anchors on first open. The bars that carried a sync point become pins when the old sync was made by hand.
+- **Manual sync:**
+  - Dragging a bar line pins it, and the bars up to the neighbouring pins stretch. On a side with no pin, the bars move along instead.
+  - Shift-drag, or the "Move following bars" toggle, moves a bar and everything after it.
+  - Dragging empty space moves everything. The offset slider sets `globalOffset` (±300 ms).
+  - Tap mode pins one bar per tap. Delete unpins the selected bar.
+- **Re-analysis** passes the pins as `lockedAnchors`. The start search only accepts starts that agree with the first pin, and `fitToLocks` stretches the result so every pin is met exactly.
+- **Confidence:** bars with an anchor under 0.5 confidence are tinted, and "N bars to check · next" jumps between them. Each bar shows its tempo, and the tab shows a tempo label where the tempo changes by 3 % or more.
+- **Server:** pushing is on when `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set. Without them, sync stays on the device. The table's row-level-security policies allow signed-in users only, so pushing also needs accounts, which come in phase 5.
 
 Differences from the plan above:
 - `pipeline.ts` holds the whole analysis as one pure function, so the tests run it without a worker.
 - §6.1 scores candidate starts over the whole song, not just 8 bars (the downbeat bonus still uses the first 8 bars). In a song with a note on every beat, only the end of the music tells a count-in from bar 1.
 - Song confidence is the contrast between the onset strength where the anchors put the score's notes and the average onset strength (noise ≈ 2×, real matches ≥ 4×), mixed with the mean per-anchor confidence of §6.3.
-- `lockedAnchors` is in the worker protocol but not used yet.
+- `SyncData.autoAnchors` keeps the last auto-sync result on the device, for "Reset to auto-sync". It is not pushed.
+- `song_id` has no foreign key yet: songs don't live in Supabase yet.
+- The old tempo-mark editor is gone. Its per-mark BPM field and per-mark bar length were replaced by anchors, which can follow any bar or beat timing directly.

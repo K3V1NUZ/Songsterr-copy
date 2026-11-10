@@ -7,7 +7,8 @@ import { fft } from '@/sync/fft';
 import { scoreTimingFromAlphaTab } from '@/sync/fromAlphaTab';
 import { FPS, onsetCurve, SAMPLE_RATE } from '@/sync/onset';
 import { analyze, type AnalyzeResult } from '@/sync/pipeline';
-import { anchorsToSyncPoints, quarterToScoreBeat, scoreBeats, scoreOnsets } from '@/sync/scoreBeats';
+import { anchorsToPlayerPoints } from '@/sync/anchors';
+import { quarterToScoreBeat, scoreBeats, scoreOnsets } from '@/sync/scoreBeats';
 import { scoreNoteEvents, type NoteEvent } from '@/sync/scoreEvents';
 import { createSyncMap } from '@/sync/syncMap';
 import { refineTempo } from '@/sync/tempo';
@@ -199,7 +200,7 @@ function render(evs: NoteEvent[], warp: (scoreMs: number) => number, opts: { pit
 
 /** Bar-start errors (ms) after converting the anchors to the player's sync points. */
 function barErrors(res: AnalyzeResult, warp: (ms: number) => number) {
-  const map = createSyncMap(tl, anchorsToSyncPoints(tl, beats, res.anchors));
+  const map = createSyncMap(tl, anchorsToPlayerPoints(tl, beats, res.anchors));
   const errs = tl.played.map((p) => Math.abs(map.beatToMs(p.startBeat) - warp(p.startMs)));
   return { mean: errs.reduce((a, b) => a + b, 0) / errs.length, max: Math.max(...errs) };
 }
@@ -230,5 +231,20 @@ describe('Greensleeves end to end', () => {
     const warp = (ms: number) => 800 + ms * 0.97;
     const res = analyze({ samples: render(events, warp, { pitched: false }), sampleRate: SR, scoreBeats: beats, onsets, tempoScale: 1 / 0.97 });
     expect(barErrors(res, warp).mean).toBeLessThan(25);
+  });
+});
+
+describe('re-analysis with pinned bars', () => {
+  it('keeps the pins and follows them, even when they disagree with the audio start', () => {
+    const tlc = plainTimeline(16, 120);
+    const truth = Array.from({ length: 64 }, (_, k) => 1 + k * 0.5);
+    const pcm = clickTrack(truth, 35);
+    const bs = scoreBeats(tlc);
+    // the user says score beat 0 is the click at 3 s (e.g. the first 4 clicks are a count-in)
+    const locked = [{ scoreBeat: 0, time: 3, source: 'manual' as const, confidence: 1 }];
+    const res = analyze({ samples: pcm, sampleRate: SR, scoreBeats: bs, onsets: bs.map((b) => ({ scoreBeat: b.index, weight: 1 })), lockedAnchors: locked });
+    expect(res.anchors[0]).toEqual(locked[0]);
+    for (let j = 1; j < 50; j++) expect(Math.abs(res.anchors[j]!.time - truth[j + 4]!)).toBeLessThan(0.02);
+    expect(res.warnings.some((w) => w.code === 'LOW_CONFIDENCE_START')).toBe(false);
   });
 });

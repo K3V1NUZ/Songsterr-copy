@@ -8,8 +8,10 @@ import { cx, TrackItem } from '@/components/ui';
 import { repo } from '@/app/repo';
 import type { Song } from '@/data/types';
 import { SyncPanel } from '@/features/sync/SyncPanel';
-import { marksFromSyncPoints, tempoLabels } from '@/sync/tempoMarks';
-import { syncPointsToPlayed, tempoMarksToPlayed } from '@/sync/unroll';
+import { anchorsFromSyncPoints, anchorsToPlayerPoints, tempoLabels } from '@/sync/anchors';
+import { scoreBeats } from '@/sync/scoreBeats';
+import { syncPointsToPlayed } from '@/sync/unroll';
+import { loadSync } from '@/features/sync/syncState';
 import { useSettings } from '@/store/settings';
 import { useUi } from '@/store/ui';
 import { AlphaTabView, type ScoreView } from './AlphaTabView';
@@ -87,10 +89,8 @@ export function PlayerPage() {
     const patch: Partial<Song> = {
       barNumbering: 'played',
       syncPoints: syncPointsToPlayed(order, s.syncPoints),
-      ...(s.tempoMarks ? { tempoMarks: tempoMarksToPlayed(order, s.tempoMarks) } : {}),
-      ...(s.autoSyncPoints ? { autoSyncPoints: syncPointsToPlayed(order, s.autoSyncPoints) } : {}),
     };
-    controller.setSyncPoints(patch.syncPoints!, patch.tempoMarks ?? s.tempoMarks);
+    controller.setSyncPoints(patch.syncPoints!);
     setCurrent({ ...s, ...patch });
     void repo.updateSong(s.id, patch).then(setCurrent);
   }, [controller, setCurrent]);
@@ -98,14 +98,29 @@ export function PlayerPage() {
   // the recording's tempo (from the sync) above the bars where it changes
   const tl = controller?.scoreTimeline;
   const labels = useMemo(() => {
-    if (mode !== 'media' || !active || !tl || (!active.tempoMarks?.length && !active.syncPoints.length)) return null;
-    return tempoLabels(tl, active.tempoMarks ?? marksFromSyncPoints(tl, active.syncPoints, active.bpm));
-  }, [mode, active?.tempoMarks, active?.syncPoints, active?.bpm, tl, scoreVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (mode !== 'media' || !active || !tl || !active.syncPoints.length) return null;
+    const beats = scoreBeats(tl);
+    return tempoLabels(tl, beats, anchorsFromSyncPoints(tl, beats, active.syncPoints, 'auto'));
+  }, [mode, active?.syncPoints, tl, scoreVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // the saved anchors are the source of truth: when they are newer than the song's sync points
+  // (edited on another device, or a song from before anchors), the player follows them
+  useEffect(() => {
+    if (!controller || !tl || !active || mode !== 'media') return;
+    let live = true;
+    void loadSync(active, tl).then((s) => {
+      const points = anchorsToPlayerPoints(tl, s.beats, s.anchors, s.globalOffset);
+      if (!live || !active.syncPoints.length || JSON.stringify(points) === JSON.stringify(active.syncPoints)) return;
+      controller.setSyncPoints(points);
+      void repo.updateSong(active.id, { syncPoints: points, barNumbering: 'played' }).then((saved) => { if (live) setCurrent(saved); });
+    });
+    return () => { live = false; };
+  }, [controller, tl, active?.id, mode, scoreVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // one controller per song + recording; audio files are loaded into it
   useEffect(() => {
     if (!active) return;
-    const c = new PlayerController(mode, active.syncPoints, active.tempoMarks);
+    const c = new PlayerController(mode, active.syncPoints);
     setController(c);
     setPartState({});
     void (async () => {

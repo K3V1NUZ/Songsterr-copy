@@ -1,6 +1,7 @@
 // Export / import a song as one zip: song.json + its files (score, audio, stems).
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 import { newId, type SongRepository } from './SongRepository';
+import type { SyncData } from '@/sync/types';
 import type { FileBlob, Id, Song } from './types';
 
 export const BUNDLE_VERSION = 1;
@@ -10,6 +11,8 @@ interface BundleManifest {
   version: number;
   song: Song;
   files: Array<Omit<FileBlob, 'blob' | 'storagePath'> & { path: string }>;
+  /** The song's anchors (optional: songs synced before anchors only have sync points). */
+  sync?: Omit<SyncData, 'songId' | 'dirty' | 'updatedAt'>;
 }
 
 const safe = (name: string) => name.replace(/[^\w.() -]+/g, '_').slice(0, 100) || 'file';
@@ -27,7 +30,12 @@ export async function exportSongBundle(repo: SongRepository, songId: Id): Promis
     entries[path] = [new Uint8Array(await f.blob.arrayBuffer()), { level: 0 }]; // audio is already compressed
     files.push({ id: f.id, kind: f.kind, name: f.name, mime: f.mime, size: f.size, path });
   }
+  const sync = await repo.getSync(songId);
   const manifest: BundleManifest = { format: 'fretline-song', version: BUNDLE_VERSION, song, files };
+  if (sync) {
+    const { songId: _id, dirty: _dirty, updatedAt: _at, ...rest } = sync;
+    manifest.sync = rest;
+  }
   entries['song.json'] = strToU8(JSON.stringify(manifest, null, 2));
   return zipSync(entries);
 }
@@ -54,7 +62,7 @@ export async function importSongBundle(repo: SongRepository, data: Uint8Array): 
   if (!scoreFileId) throw new Error('Bundle has no score file');
   const audioFileId = map(s.audioFileId);
   const partIds = new Map(s.parts.map((p) => [p.id, newId()] as const));
-  return repo.createSong({
+  const created = await repo.createSong({
     title: s.title, artist: s.artist, bpm: s.bpm, tags: s.tags, tuning: s.tuning, difficulty: s.difficulty,
     scoreFileId, scoreFormat: s.scoreFormat, ...(audioFileId ? { audioFileId } : {}), durationMs: s.durationMs,
     parts: s.parts.map((p) => ({ ...p, id: partIds.get(p.id) ?? newId() })),
@@ -66,7 +74,7 @@ export async function importSongBundle(repo: SongRepository, data: Uint8Array): 
     }),
     syncPoints: s.syncPoints, syncSource: s.syncSource, syncConfidence: s.syncConfidence,
     ...(s.barNumbering ? { barNumbering: s.barNumbering } : {}),
-    ...(s.autoSyncPoints ? { autoSyncPoints: s.autoSyncPoints } : {}),
-    ...(s.tempoMarks ? { tempoMarks: s.tempoMarks } : {}),
   });
+  if (manifest.sync) await repo.putSync({ ...manifest.sync, songId: created.id, updatedAt: Date.now(), dirty: true });
+  return created;
 }

@@ -28,6 +28,8 @@ export interface ScoreBeat {
   quarter: number;
   /** Length of this beat in quarter notes (1.5 in 6/8, shorter for a cut-off last beat of a pickup). */
   quarters: number;
+  /** Length of this beat in seconds at the written tempo. */
+  seconds: number;
 }
 
 /** A note onset of the score, placed on the beat grid. */
@@ -43,4 +45,21 @@ export type SyncWarningCode = 'TEMPO_DOUBLE' | 'TEMPO_HALF' | 'LOW_CONFIDENCE_ST
 export interface SyncWarning {
   code: SyncWarningCode;
   detail: string;
+}
+
+/** The saved sync of one song (docs/SYNC_ENGINE.md §3, §10). */
+export interface SyncData {
+  songId: string;
+  /** One per score beat, always sorted by scoreBeat. */
+  anchors: Anchor[];
+  /** Seconds, added to every anchor (fixes MP3 decoder delay or a consistently early/late feel). */
+  globalOffset: number;
+  /** Version of the auto-sync algorithm that produced the auto anchors. */
+  algoVersion: number;
+  /** ms timestamp, used for "newest edit wins". */
+  updatedAt: number;
+  /** true = not pushed to the server yet. */
+  dirty: boolean;
+  /** The last auto-sync result, so manual edits can be reset to it. Local only. */
+  autoAnchors?: Anchor[];
 }

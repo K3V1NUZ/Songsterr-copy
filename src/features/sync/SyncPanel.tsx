@@ -1,27 +1,26 @@
-// Manual sync tool: two stacked lanes like a video-editor timeline.
+// Manual sync tool (docs/SYNC_ENGINE.md §8): two stacked lanes like a video-editor timeline, both a view
+// of the anchors.
 //   top    = recording waveform (drag to scroll, click to jump there)
-//   bottom = the score's bars with tempo marks
-// A tempo mark says "from this bar on, the recording plays at N BPM". Click a barline to add a
-// mark, select it and set its BPM; bars after it follow until the next mark. Dragging a barline
-// lines that bar up with the music (it changes the BPM of the mark before it). Dragging empty space
-// moves everything. Every change is previewed live in the tab and saved per song.
+//   bottom = the score's bars (drag a bar line onto its beat in the waveform)
+// Dragging a bar line pins that bar (a manual anchor); the bars between it and the neighbouring pins
+// stretch. Shift-drag (or "Move following") moves the bar and everything after it. The offset slider
+// shifts the whole song a little; tapping pins one bar per tap. Auto-sync keeps the pins and only fills
+// in the beats between them. Every change is previewed live in the tab and saved per song, offline too.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '@/components/ui';
-import { repo } from '@/app/repo';
-import type { Song, TempoMark } from '@/data/types';
+import { Button, Slider } from '@/components/ui';
+import type { Song } from '@/data/types';
 import type { PlayerController } from '@/features/player/PlayerController';
 import { usePlayer } from '@/features/player/playerStore';
 import { fmtTime } from '@/features/player/BottomBar';
+import { anchorsToPlayerPoints, barConfidence, barTempos, isLocked, moveAnchor, shiftAll, shiftFrom, unpin } from '@/sync/anchors';
 import { decodeForAnalysis, waveformPeaks, type Peaks } from '@/sync/decode';
 import { runAutoSync } from '@/sync/runAutoSync';
-import { createSyncMap } from '@/sync/syncMap';
-import {
-  addMark, layoutMarks, markAt, markIndex, marksFromSyncPoints, MAX_BPM, MIN_BPM, moveMark, removeMark, setMarkBpm, setMarkSignature, shiftMarks,
-  simplifyMarks, syncPointsFromMarks,
-} from '@/sync/tempoMarks';
+import { ALGO_VERSION } from '@/sync/storage';
 import type { Timeline } from '@/sync/timeline';
-import { useHistory } from './useHistory';
+import type { Anchor, ScoreBeat } from '@/sync/types';
 import { useSettings } from '@/store/settings';
+import { useHistory } from './useHistory';
+import { loadSync, saveSync, type SyncState } from './syncState';
 
 interface Props {
   song: Song;
@@ -38,30 +37,17 @@ interface Props {
 const WAVE_H = 88;
 const BARS_H = 64;
 const TAP_LATENCY_MS = 60;
-const AUTO_TOLERANCE_MS = 20;
-const TAP_TOLERANCE_MS = 35;
+/** Bars with an anchor below this confidence are tinted: "check the sync here". */
+const LOW_CONFIDENCE = 0.5;
+const OFFSET_RANGE_MS = 300;
 
 type Drag =
   | { kind: 'pan'; x0: number; view0: number; moved: boolean }
-  | { kind: 'shift'; x0: number; base: TempoMark[] }
-  | { kind: 'bar'; played: number; x0: number; base: TempoMark[]; moved: boolean };
+  | { kind: 'all'; x0: number; base: SyncState }
+  | { kind: 'bar'; played: number; x0: number; base: SyncState; following: boolean; moved: boolean };
 
-/** Marks to start from: saved marks, or converted from older sync points, or one mark at bar 1. */
-function initialMarks(tl: Timeline, song: Song): TempoMark[] {
-  if (song.tempoMarks?.length) return layoutMarks(tl, song.tempoMarks);
-  if (song.syncPoints.length) return simplifyMarks(tl, marksFromSyncPoints(tl, song.syncPoints, song.bpm), 10);
-  const first = tl.played[0];
-  return first ? [{ barIndex: first.barIndex, barOccurence: first.occurrence, millisecondOffset: 0, bpm: song.bpm }] : [];
-}
-
-const fromAuto = (tl: Timeline, points: Song['syncPoints'], bpm: number) =>
-  simplifyMarks(tl, marksFromSyncPoints(tl, points, bpm), AUTO_TOLERANCE_MS);
-
-const fmtBpm = (bpm: number) => String(Math.round(bpm * 10) / 10);
-/** Bars are numbered in the order they are played: a repeated bar just gets the next number. */
-const barName = (p: { index: number }) => String(p.index + 1);
-const SIGNATURES: Array<[number, number]> = [[2, 4], [3, 4], [4, 4], [5, 4], [6, 4], [7, 4], [3, 8], [5, 8], [6, 8], [7, 8], [9, 8], [12, 8]];
-const sigText = (s: [number, number]) => `${s[0]}/${s[1]}`;
+const EMPTY: SyncState = { anchors: [], globalOffset: 0 };
+const fmtOffset = (s: number) => `${s >= 0 ? '+' : ''}${Math.round(s * 1000)} ms`;
 
 export function SyncPanel({ song, controller, recording, onSongChange, onClose, autoRun, onAutoDone }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -69,13 +55,13 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   const [width, setWidth] = useState(800);
   const [peaks, setPeaks] = useState<Peaks | null>(null);
   const [view, setView] = useState({ startMs: 0, msPerPx: 25 }); // 25 ms/px ≈ 20 s on screen
-  const history = useHistory<TempoMark[]>([]);
-  const marks = history.value;
-  const [ready, setReady] = useState(false);
-  const [selected, setSelected] = useState(0);
+  const history = useHistory<SyncState>(EMPTY);
+  const state = history.value;
+  const [beats, setBeats] = useState<ScoreBeat[] | null>(null);
+  const [autoAnchors, setAutoAnchors] = useState<Anchor[] | undefined>();
+  const [selected, setSelected] = useState<number | null>(null); // played bar index
+  const [following, setFollowing] = useState(false);
   const [busy, setBusy] = useState<{ fraction: number; stage: string } | null>(null);
-  /** BPM field while typing: the marks it started from, so each keystroke re-times from the same base. */
-  const [bpmEdit, setBpmEdit] = useState<{ text: string; base: TempoMark[] } | null>(null);
   const [tap, setTap] = useState<{ next: number } | null>(null);
   const [message, setMessage] = useState('');
   const drag = useRef<Drag | null>(null);
@@ -85,17 +71,31 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   const theme = useSettings((s) => s.theme); // redraw the canvas when the theme changes
   // re-render when the controller has loaded the score (it's a mutable object)
   const scoreVersion = usePlayer((s) => s.scoreVersion);
-  const tl = controller.scoreTimeline;
+  const tl: Timeline | null = controller.scoreTimeline;
+  const ready = !!beats && !!tl;
 
-  // start from the song's sync once the score is loaded
+  // start from the song's saved sync once the score is loaded
+  const loadedFor = useRef<Timeline | null>(null);
   useEffect(() => {
-    if (!tl || ready) return;
-    history.reset(initialMarks(tl, song));
-    setReady(true);
-  }, [tl, ready, scoreVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!tl || loadedFor.current === tl) return;
+    loadedFor.current = tl;
+    let live = true;
+    void loadSync(song, tl).then((s) => {
+      if (!live) return;
+      setBeats(s.beats);
+      setAutoAnchors(s.autoAnchors);
+      history.reset({ anchors: s.anchors, globalOffset: s.globalOffset });
+      if (s.outdated) setMessage('Auto-sync has improved since this song was synced. Run it again to update it (your pinned bars are kept).');
+    });
+    return () => { live = false; };
+  }, [tl, scoreVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sel = Math.min(selected, Math.max(0, marks.length - 1));
-  const points = useMemo(() => (tl && ready ? syncPointsFromMarks(tl, marks) : []), [tl, ready, marks]);
+  /** Anchor index of each played bar's first beat. */
+  const downbeats = useMemo(() => {
+    const out: number[] = [];
+    for (const b of beats ?? []) if (b.isDownbeat) out[b.playedIndex] = b.index;
+    return out;
+  }, [beats]);
 
   // waveform
   useEffect(() => {
@@ -117,27 +117,24 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   const songRef = useRef(song);
   songRef.current = song;
   useEffect(() => {
-    if (!ready) return;
-    controller.setSyncPoints(points, marks);
+    if (!tl || !beats || !state.anchors.length) return;
+    controller.setSyncPoints(anchorsToPlayerPoints(tl, beats, state.anchors, state.globalOffset));
     if (!history.touched) return;
-    const t = setTimeout(() => {
-      const s = songRef.current;
-      void repo.updateSong(s.id, { tempoMarks: marks, syncPoints: points, barNumbering: 'played', syncSource: 'manual', syncVersion: s.syncVersion + 1 }).then(onSongChange);
-    }, 600);
+    const t = setTimeout(() => { void saveSync(songRef.current, tl, beats, state).then(onSongChange); }, 600);
     return () => clearTimeout(t);
-  }, [points]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toX = useCallback((ms: number) => (ms - view.startMs) / view.msPerPx, [view]);
   const toMs = useCallback((x: number) => view.startMs + x * view.msPerPx, [view]);
+  /** Recording ms of an anchor (global offset applied). */
+  const anchorMs = useCallback((i: number) => ((state.anchors[i]?.time ?? 0) + state.globalOffset) * 1000, [state]);
+
+  const conf = useMemo(() => (tl && beats ? barConfidence(tl, beats, state.anchors) : []), [tl, beats, state.anchors]);
+  const tempos = useMemo(() => (tl && beats ? barTempos(tl, beats, state.anchors) : []), [tl, beats, state.anchors]);
+  const lowBars = useMemo(() => conf.flatMap((c, k) => (c < LOW_CONFIDENCE ? [k] : [])), [conf]);
+  const pins = state.anchors.filter(isLocked).length;
 
   // ---- drawing ------------------------------------------------------------------------------
-  const barTimes = useMemo(() => {
-    if (!tl || !ready) return [];
-    const map = createSyncMap(tl, points);
-    const markAtBar = new Map(marks.map((m, i) => [markIndex(tl, m), i] as const));
-    return tl.played.map((p, k) => ({ ms: map.beatToMs(p.startBeat), p, mark: markAtBar.get(k) }));
-  }, [tl, ready, points, marks]);
-
   useEffect(() => {
     // draw on the next frame: a theme change applies its CSS class after this effect runs
     const raf = requestAnimationFrame(() => draw());
@@ -176,40 +173,60 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
         g.font = '12px sans-serif';
         g.fillText(recording ? 'Loading waveform…' : 'No recording attached', 12, WAVE_H / 2);
       }
-      // bars and tempo marks
-      for (const { ms, p, mark } of barTimes) {
-        const x = toX(ms);
-        if (x < -80 || x > width + 80) continue;
-        const isMark = mark !== undefined;
-        g.fillStyle = isMark ? col('--c-accent') : col('--c-line');
-        g.fillRect(x - 0.5, 0, 1, WAVE_H); // guide across the waveform
-        g.fillStyle = isMark ? col('--c-accent') : col('--c-ink-2');
-        g.fillRect(x - (isMark ? 1 : 0.5), WAVE_H, isMark ? 2 : 1, BARS_H);
-        g.fillStyle = col('--c-ink');
-        g.font = '11px ui-monospace, monospace';
-        g.fillText(barName(p), x + 4, WAVE_H + 14);
-        if (isMark) {
-          const m = marks[mark]!;
-          const text = `♩ ${fmtBpm(m.bpm)}${m.timeSignature ? ` · ${sigText(m.timeSignature)}` : ''}`;
-          g.font = '600 11px system-ui, sans-serif';
-          const w = g.measureText(text).width + 10;
-          const y = WAVE_H + BARS_H - 24;
-          const on = mark === sel;
-          g.fillStyle = on ? col('--c-accent') : col('--c-surface');
-          g.strokeStyle = col('--c-accent');
-          g.beginPath();
-          g.roundRect(x, y, w, 18, 3);
-          g.fill();
-          g.stroke();
-          g.fillStyle = on ? col('--c-on-accent') : col('--c-accent-ink');
-          g.fillText(text, x + 5, y + 13);
+      if (!tl || !beats) return;
+      // beats (between the bar lines), when there is room for them
+      const beatPx = (60000 / Math.max(30, song.bpm || 120)) / view.msPerPx;
+      if (beatPx > 8) {
+        g.fillStyle = col('--c-line-strong');
+        for (const b of beats) {
+          if (b.isDownbeat) continue;
+          const x = toX(anchorMs(b.index));
+          if (x >= -2 && x <= width + 2) g.fillRect(x - 0.5, WAVE_H + BARS_H - 10, 1, 10);
         }
       }
+      // bars: low-confidence tint, bar line, number, tempo, pin
+      const warn = col('--c-warn');
+      tl.played.forEach((p, k) => {
+        const i = downbeats[k];
+        if (i === undefined) return;
+        const x = toX(anchorMs(i));
+        const nextI = downbeats[k + 1];
+        const x2 = nextI !== undefined ? toX(anchorMs(nextI)) : x + 4 * beatPx;
+        if (x2 < -80 || x > width + 80) return;
+        if ((conf[k] ?? 1) < LOW_CONFIDENCE) {
+          g.globalAlpha = 0.16;
+          g.fillStyle = warn;
+          g.fillRect(x, WAVE_H, x2 - x, BARS_H);
+          g.globalAlpha = 1;
+        }
+        const pinned = isLocked(state.anchors[i]!);
+        const on = selected === k;
+        g.fillStyle = pinned || on ? col('--c-accent') : col('--c-line');
+        g.fillRect(x - 0.5, 0, 1, WAVE_H); // guide across the waveform
+        g.fillStyle = pinned || on ? col('--c-accent') : col('--c-ink-2');
+        g.fillRect(x - (pinned || on ? 1 : 0.5), WAVE_H, pinned || on ? 2 : 1, BARS_H);
+        g.fillStyle = col('--c-ink');
+        g.font = on ? '600 11px ui-monospace, monospace' : '11px ui-monospace, monospace';
+        g.fillText(String(p.index + 1), x + 4, WAVE_H + 14);
+        if (x2 - x > 48 && tempos[k]) {
+          g.fillStyle = col('--c-ink-2');
+          g.font = '10px system-ui, sans-serif';
+          g.fillText(`♩ ${Math.round(tempos[k]!)}`, x + 4, WAVE_H + 30);
+        }
+        if (pinned) {
+          g.fillStyle = col('--c-accent');
+          g.beginPath();
+          g.moveTo(x - 5, WAVE_H);
+          g.lineTo(x + 5, WAVE_H);
+          g.lineTo(x, WAVE_H + 7);
+          g.fill();
+        }
+      });
       // playhead
       g.fillStyle = col('--c-danger');
       g.fillRect(toX(positionMs) - 1, 0, 2, WAVE_H + BARS_H);
     }
-  }, [width, peaks, view, barTimes, marks, sel, positionMs, recording, toMs, toX, theme]);
+  }, [width, peaks, view, state, beats, downbeats, conf, tempos, selected, positionMs, recording, toMs, toX, anchorMs, tl, song.bpm, theme]);
 
   // keep the playhead in view while playing
   useEffect(() => {
@@ -217,21 +234,20 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
     if (x > width * 0.85 || x < 0) setView((v) => ({ ...v, startMs: Math.max(-2000, positionMs - width * 0.2 * v.msPerPx) }));
   }, [positionMs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---- editing helpers ----------------------------------------------------------------------
-  /** Marks with one at `played` (added if missing), and that mark's index. */
-  const withMarkAt = (base: TempoMark[], played: number): [TempoMark[], number] => {
-    if (!tl) return [base, -1];
-    const next = addMark(tl, base, played);
-    return [next, next.findIndex((m) => markIndex(tl, m) === played)];
-  };
-
-  const select = (i: number) => { setSelected(i); setBpmEdit(null); };
-
   // ---- pointer interaction --------------------------------------------------------------------
   const nearestBarline = (x: number): number | null => {
     let best: number | null = null, bestD = 9;
-    barTimes.forEach(({ ms }, k) => { const d = Math.abs(toX(ms) - x); if (d < bestD) { bestD = d; best = k; } });
+    downbeats.forEach((i, k) => { const d = Math.abs(toX(anchorMs(i)) - x); if (d < bestD) { bestD = d; best = k; } });
     return best;
+  };
+
+  /** Drags bar `k`'s line to recording time `ms`. */
+  const dragBar = (base: SyncState, k: number, ms: number, follow: boolean): SyncState => {
+    const i = downbeats[k];
+    if (i === undefined) return base;
+    const t = ms / 1000 - base.globalOffset;
+    const anchors = follow ? shiftFrom(base.anchors, i, t - base.anchors[i]!.time) : moveAnchor(base.anchors, i, t);
+    return { ...base, anchors };
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -246,9 +262,11 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
       return;
     }
     if (y < WAVE_H) drag.current = { kind: 'pan', x0: x, view0: view.startMs, moved: false };
-    else {
+    else if (ready) {
       const k = nearestBarline(x);
-      drag.current = k !== null ? { kind: 'bar', played: k, x0: x, base: marks, moved: false } : { kind: 'shift', x0: x, base: marks };
+      drag.current = k !== null
+        ? { kind: 'bar', played: k, x0: x, base: state, following: following || e.shiftKey, moved: false }
+        : { kind: 'all', x0: x, base: state };
     }
   };
 
@@ -271,15 +289,15 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
     if (d.kind === 'pan') {
       if (Math.abs(x - d.x0) > 3) d.moved = true;
       setView((v) => ({ ...v, startMs: d.view0 - (x - d.x0) * v.msPerPx }));
-    } else if (d.kind === 'shift') {
-      history.preview(shiftMarks(d.base, (x - d.x0) * view.msPerPx));
-    } else if (tl) {
+    } else if (d.kind === 'all') {
+      history.preview({ ...d.base, anchors: shiftAll(d.base.anchors, ((x - d.x0) * view.msPerPx) / 1000) });
+    } else {
       if (!d.moved && Math.abs(x - d.x0) <= 3) return;
       d.moved = true;
-      const [base, i] = withMarkAt(d.base, d.played);
-      if (i < 0) return;
-      setSelected(i);
-      history.preview(moveMark(tl, base, i, toMs(x)));
+      setSelected(d.played);
+      const i = downbeats[d.played]!;
+      const startMs = (d.base.anchors[i]!.time + d.base.globalOffset) * 1000;
+      history.preview(dragBar(d.base, d.played, startMs + (x - d.x0) * view.msPerPx, d.following));
     }
   };
 
@@ -292,10 +310,7 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
     if (d.kind === 'pan') {
       if (!d.moved) controller.seek(Math.max(0, toMs(e.clientX - e.currentTarget.getBoundingClientRect().left)));
     } else if (d.kind === 'bar' && !d.moved) {
-      // click on a barline: select its mark, or add one there
-      const [next, i] = withMarkAt(marks, d.played);
-      if (next !== marks) history.set(next);
-      if (i >= 0) select(i);
+      setSelected((s) => (s === d.played ? null : d.played)); // click on a bar line: select it
     } else history.commit();
   };
 
@@ -312,69 +327,53 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   };
 
   // ---- tools ------------------------------------------------------------------------------------
-  const selMark = marks[sel];
-  const selBar = tl && selMark ? tl.played[markIndex(tl, selMark)] : undefined;
-  const playheadBar = () => Math.max(0, controller.locate(positionMs)?.playedIndex ?? 0);
-  const beatMs = () => {
-    const m = tl ? marks[markAt(tl, marks, playheadBar())] : undefined;
-    return 60000 / (m?.bpm ?? song.bpm);
+  const selAnchor = selected !== null ? downbeats[selected] : undefined;
+  const selPinned = selAnchor !== undefined && !!state.anchors[selAnchor] && isLocked(state.anchors[selAnchor]!);
+  const playheadBeat = () => Math.max(0, controller.locate(positionMs)?.playedIndex ?? 0);
+  const beatSec = () => {
+    const t = tempos[playheadBeat()];
+    return 60 / (t && t > 0 ? t : song.bpm || 120);
   };
-  const nudge = (ms: number) => history.set(shiftMarks(marks, ms));
+  const nudgeAll = (sec: number) => history.set({ ...state, anchors: shiftAll(state.anchors, sec) });
+  const unpinSelected = () => { if (selAnchor !== undefined && selPinned) history.set({ ...state, anchors: unpin(state.anchors, selAnchor) }); };
+  const unpinRef = useRef(unpinSelected);
+  unpinRef.current = unpinSelected;
 
-  // BPM of the selected mark (from its bar until the next mark)
-  const typeBpm = (text: string) => {
-    if (!tl) return;
-    const base = bpmEdit?.base ?? marks;
-    setBpmEdit({ text, base });
-    const n = Number(text);
-    if (n >= MIN_BPM && n <= MAX_BPM) history.preview(setMarkBpm(tl, base, sel, n));
-  };
-  const endBpmEdit = () => {
-    if (!bpmEdit) return;
-    const n = Number(bpmEdit.text);
-    setBpmEdit(null);
-    if (n >= MIN_BPM && n <= MAX_BPM) history.commit(); else history.preview(bpmEdit.base);
-  };
-  const stepBpm = (d: number) => {
-    if (!tl || !selMark) return;
-    history.set(setMarkBpm(tl, marks, sel, Math.round(selMark.bpm) + d));
-  };
-  const addAtPlayhead = () => {
-    const [next, i] = withMarkAt(marks, playheadBar());
-    if (next !== marks) history.set(next);
-    if (i >= 0) select(i);
-  };
-  const removeSelected = () => {
-    if (!tl || sel <= 0) return;
-    history.set(removeMark(tl, marks, sel));
-    select(sel - 1);
-  };
-  const removeRef = useRef(removeSelected);
-  removeRef.current = removeSelected;
-
-  // Delete / Backspace removes the selected mark
+  // Delete / Backspace unpins the selected bar
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && !(e.target as HTMLElement | null)?.closest('input, textarea, select')) {
         e.preventDefault();
-        removeRef.current();
+        unpinRef.current();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // tapping the downbeats: each tap lines up one bar
+  /** Jumps to the next bar that needs checking (after the playhead), and selects it. */
+  const nextToCheck = () => {
+    if (!lowBars.length) return;
+    const now = playheadBeat();
+    const k = lowBars.find((b) => b > now) ?? lowBars[0]!;
+    const i = downbeats[k];
+    if (i === undefined) return;
+    setSelected(k);
+    const ms = anchorMs(i);
+    controller.seek(Math.max(0, ms - 1000));
+    setView((v) => ({ ...v, startMs: ms - width * 0.3 * v.msPerPx }));
+  };
+
+  // tap mode: each tap pins the next bar's first beat
   const doTap = useCallback(() => {
     if (!tl || !tap) return;
-    const p = tl.played[tap.next];
-    if (!p) { setTap(null); return; }
+    const i = downbeats[tap.next];
+    if (i === undefined) { setTap(null); return; }
     const ms = usePlayer.getState().positionMs - TAP_LATENCY_MS;
-    const next = addMark(tl, history.value, tap.next);
-    const i = next.findIndex((m) => markIndex(tl, m) === tap.next);
-    if (i >= 0) history.set(moveMark(tl, next, i, ms));
+    const cur = history.value;
+    history.set({ ...cur, anchors: moveAnchor(cur.anchors, i, ms / 1000 - cur.globalOffset) });
     setTap({ next: tap.next + 1 });
-  }, [tl, tap, history]);
+  }, [tl, tap, history, downbeats]);
 
   useEffect(() => {
     if (!tap) return;
@@ -390,49 +389,48 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
     const loc = controller.locate(positionMs);
     const next = loc ? Math.min(tl.played.length - 1, loc.barPosition < 0.5 ? loc.playedIndex : loc.playedIndex + 1) : 0;
     setTap({ next });
-    setMessage(`Press K (or the Tap button) on the first beat of bar ${tl.played[next]!.barIndex + 1} and each bar after it.`);
+    setMessage(`Press K (or the Tap button) on the first beat of bar ${next + 1} and each bar after it.`);
     if (usePlayer.getState().state !== 'playing') controller.play();
   };
-  const stopTap = () => {
-    setTap(null);
-    setMessage('');
-    if (tl) history.set(simplifyMarks(tl, marks, TAP_TOLERANCE_MS)); // keep only real tempo changes
-  };
+  const stopTap = () => { setTap(null); setMessage(''); };
 
   const autoSync = useCallback(async () => {
     const score = controller.alphaTab?.score;
-    if (!recording || !score || !tl) return;
+    if (!recording || !score || !tl || !beats) return;
     setBusy({ fraction: 0, stage: 'Starting' });
     setMessage('');
     try {
-      const res = await runAutoSync(recording, score, tl, song.bpm, (fraction, stage) => setBusy({ fraction, stage }));
-      const next = fromAuto(tl, res.syncPoints, song.bpm);
-      const saved = await repo.updateSong(song.id, {
-        tempoMarks: next, syncPoints: syncPointsFromMarks(tl, next), autoSyncPoints: res.syncPoints, barNumbering: 'played',
-        syncSource: 'auto', syncConfidence: res.confidence, syncVersion: song.syncVersion + 1,
+      const locked = history.value.anchors.filter(isLocked);
+      const res = await runAutoSync(recording, score, tl, song.bpm, (fraction, stage) => setBusy({ fraction, stage }), locked);
+      const next: SyncState = { anchors: res.anchors, globalOffset: history.value.globalOffset };
+      const saved = await saveSync(song, tl, beats, next, {
+        source: locked.length ? 'manual' : 'auto', confidence: res.confidence, autoAnchors: res.anchors, algoVersion: ALGO_VERSION,
       });
       onSongChange(saved);
+      setAutoAnchors(res.anchors);
       history.reset(next);
-      setSelected(0);
+      const pct = Math.round(res.confidence * 100);
+      const low = barConfidence(tl, beats, res.anchors).filter((c) => c < LOW_CONFIDENCE).length;
       const notes = res.warnings.map((w) => ` ${w.detail}`).join('');
       setMessage((res.confidence >= 0.6
-        ? `Synced automatically (confidence ${Math.round(res.confidence * 100)} %). Play it to check.`
-        : `Auto-sync isn't sure (confidence ${Math.round(res.confidence * 100)} %). Drag bar 1 to where the song starts, then add tempo marks where it speeds up or slows down.`) + notes);
+        ? `Synced automatically (confidence ${pct} %).${low ? ` ${low} bar${low > 1 ? 's' : ''} to check (tinted).` : ''} Play it to check.`
+        : `Auto-sync isn't sure (confidence ${pct} %). Drag bar 1 onto the first beat in the waveform, then pin bars where it drifts, and run auto-sync again.`)
+        + (locked.length ? ` Your ${locked.length} pinned bar${locked.length > 1 ? 's were' : ' was'} kept.` : '') + notes);
       onAutoDone?.(res.confidence);
-      const first = next[0];
-      if (first) setView((v) => ({ ...v, startMs: Math.max(-1000, first.millisecondOffset - 2000) }));
+      const first = res.anchors[0];
+      if (first) setView((v) => ({ ...v, startMs: Math.max(-1000, (first.time + next.globalOffset) * 1000 - 2000) }));
     } catch (err) {
       setMessage(`Auto-sync failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setBusy(null);
     }
-  }, [controller, recording, tl, song.bpm, song.id, song.syncVersion, onSongChange, history, onAutoDone]);
+  }, [controller, recording, tl, beats, song, onSongChange, history, onAutoDone]);
 
   const autoRan = useRef(false);
   useEffect(() => {
     // wait until the score *and* the recording are loaded, then run once
-    if (autoRun && !autoRan.current && ready && recording && tl && controller.alphaTab?.score) { autoRan.current = true; void autoSync(); }
-  }, [autoRun, ready, recording, tl, autoSync, controller, scoreVersion]);
+    if (autoRun && !autoRan.current && ready && recording && controller.alphaTab?.score) { autoRan.current = true; void autoSync(); }
+  }, [autoRun, ready, recording, autoSync, controller, scoreVersion]);
 
   const sourceText = song.syncSource === 'auto' ? `auto-synced (${Math.round((song.syncConfidence ?? 0) * 100)} %)` : song.syncSource === 'manual' ? 'adjusted by hand' : 'not synced yet';
 
@@ -440,56 +438,54 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
     <section className="border-t border-line bg-surface" aria-label="Sync tool">
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
         <strong>Sync</strong>
-        <span className="text-ink-2">{sourceText}</span>
-        <Button size="sm" variant="primary" onClick={() => void autoSync()} disabled={!!busy || !recording || !ready}>Auto-sync</Button>
+        <span className="text-ink-2">{sourceText}{pins ? ` · ${pins} pinned` : ''}</span>
+        <Button size="sm" variant="primary" onClick={() => void autoSync()} disabled={!!busy || !recording || !ready}
+          title={pins ? 'Your pinned bars are kept; auto-sync fills in the bars between them' : undefined}>
+          {pins ? 'Auto-sync between pins' : 'Auto-sync'}
+        </Button>
         {busy && (
           <span className="flex items-center gap-2 text-ink-2" role="status">
             <span className="h-1.5 w-24 overflow-hidden rounded bg-surface-2"><span className="block h-full bg-accent" style={{ width: `${Math.round(busy.fraction * 100)}%` }} /></span>
             {busy.stage}…
           </span>
         )}
+        {lowBars.length > 0 && !busy && (
+          <Button size="sm" variant="ghost" onClick={nextToCheck} title="Jump to the next bar auto-sync wasn't sure about">
+            <span className="text-warn">● {lowBars.length} bar{lowBars.length > 1 ? 's' : ''} to check</span> · next
+          </Button>
+        )}
         <span className="flex-1" />
         <Button size="sm" variant="ghost" onClick={history.undo} disabled={!history.canUndo} aria-label="Undo">↶ Undo</Button>
         <Button size="sm" variant="ghost" onClick={history.redo} disabled={!history.canRedo} aria-label="Redo">↷ Redo</Button>
-        <Button size="sm" variant="ghost" onClick={() => { if (tl && song.autoSyncPoints) { history.set(fromAuto(tl, song.autoSyncPoints, song.bpm)); select(0); } }}
-          disabled={!song.autoSyncPoints}>Reset to auto-sync</Button>
+        <Button size="sm" variant="ghost" onClick={() => { if (autoAnchors) { history.set({ ...state, anchors: autoAnchors }); setSelected(null); } }}
+          disabled={!autoAnchors}>Reset to auto-sync</Button>
         <Button size="sm" variant="ghost" onClick={onClose} aria-label="Close sync tool">✕</Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-1 px-3 pb-2 text-sm">
-        <span className="mr-1 text-ink-2">{selBar ? `Tempo from bar ${barName(selBar)}:` : 'Tempo:'}</span>
-        <Button size="sm" variant="ghost" onClick={() => stepBpm(-1)} disabled={!selMark} aria-label="Slower">−</Button>
-        <input inputMode="decimal" aria-label="BPM of the selected tempo mark" disabled={!selMark}
-          value={bpmEdit?.text ?? (selMark ? fmtBpm(selMark.bpm) : '')}
-          onChange={(e) => typeBpm(e.target.value.replace(/[^\d.]/g, ''))}
-          onBlur={endBpmEdit} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-          className="h-8 w-16 rounded-control border border-line bg-surface px-2 text-center text-ink tabular-nums" />
-        <Button size="sm" variant="ghost" onClick={() => stepBpm(1)} disabled={!selMark} aria-label="Faster">+</Button>
-        <span className="text-ink-2">BPM</span>
-        <select aria-label="Bar length from the selected tempo mark" disabled={!selMark}
-          title="Bar length in the recording from this mark until the next one — for when it differs from the score"
-          value={selMark?.timeSignature ? sigText(selMark.timeSignature) : ''}
-          onChange={(e) => {
-            if (!tl) return;
-            const sig = SIGNATURES.find((x) => sigText(x) === e.target.value);
-            history.set(setMarkSignature(tl, marks, sel, sig));
-          }}
-          className="ml-1 h-8 rounded-control border border-line bg-surface px-1.5 text-ink">
-          <option value="">Bars as written</option>
-          {SIGNATURES.map((x) => <option key={sigText(x)} value={sigText(x)}>Bars in {sigText(x)}</option>)}
-        </select>
-        <Button size="sm" variant="ghost" onClick={removeSelected} disabled={sel <= 0}>Remove mark</Button>
-        <Button size="sm" variant="ghost" onClick={addAtPlayhead} disabled={!ready}>+ Mark at playhead</Button>
+        <label className="mr-1 flex items-center gap-1.5 text-ink-2" title="Dragging a bar line moves that bar and everything after it (same as Shift-drag)">
+          <input type="checkbox" checked={following} onChange={(e) => setFollowing(e.target.checked)} />
+          Move following bars
+        </label>
+        <span className="text-ink-2">
+          {selected !== null ? `Bar ${selected + 1}${tempos[selected] ? ` · ♩ ${Math.round(tempos[selected]!)}` : ''}${selPinned ? ' · pinned' : ''}` : ''}
+        </span>
+        <Button size="sm" variant="ghost" onClick={unpinSelected} disabled={!selPinned}>Unpin</Button>
+        <span className="mx-2 h-5 w-px bg-line" />
+        <Slider className="w-56" label="Offset" min={-OFFSET_RANGE_MS / 1000} max={OFFSET_RANGE_MS / 1000} step={0.005}
+          value={state.globalOffset} format={fmtOffset} aria-label="Global offset"
+          onChange={(v) => history.preview({ ...state, globalOffset: Math.round(v * 1000) / 1000 })}
+          onPointerUp={() => history.commit()} onKeyUp={() => history.commit()} onBlur={() => history.commit()} />
         <span className="mx-2 h-5 w-px bg-line" />
         <span className="text-ink-2">Move all:</span>
-        <Button size="sm" variant="ghost" onClick={() => nudge(-beatMs())}>−1 beat</Button>
-        <Button size="sm" variant="ghost" onClick={() => nudge(-10)}>−10 ms</Button>
-        <Button size="sm" variant="ghost" onClick={() => nudge(10)}>+10 ms</Button>
-        <Button size="sm" variant="ghost" onClick={() => nudge(beatMs())}>+1 beat</Button>
+        <Button size="sm" variant="ghost" onClick={() => nudgeAll(-beatSec())}>−1 beat</Button>
+        <Button size="sm" variant="ghost" onClick={() => nudgeAll(-0.01)}>−10 ms</Button>
+        <Button size="sm" variant="ghost" onClick={() => nudgeAll(0.01)}>+10 ms</Button>
+        <Button size="sm" variant="ghost" onClick={() => nudgeAll(beatSec())}>+1 beat</Button>
         <span className="mx-2 h-5 w-px bg-line" />
         {tap ? (
           <>
-            <Button size="sm" variant="primary" onClick={doTap}>Tap (K) · bar {tl?.played[tap.next] ? tl.played[tap.next]!.barIndex + 1 : '–'}</Button>
+            <Button size="sm" variant="primary" onClick={doTap}>Tap (K) · bar {tl?.played[tap.next] ? tap.next + 1 : '–'}</Button>
             <Button size="sm" variant="ghost" onClick={stopTap}>Stop tapping</Button>
           </>
         ) : (
@@ -511,11 +507,12 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
           onWheel={onWheel}
-          aria-label="Sync timeline: waveform above, bars and tempo marks below"
+          aria-label="Sync timeline: waveform above, bars below"
         />
         <p className="mt-1 text-xs text-muted">
-          Click a barline to add a tempo mark (or select one), then set its BPM and, if the recording's bars differ from the score, their length — both hold until the next mark ·
-          drag a barline onto its beat in the waveform · drag empty space to move everything · Delete removes the selected mark ·
+          Drag a bar line onto its beat in the waveform: that bar is pinned and the bars up to the next pins stretch ·
+          Shift-drag (or “Move following bars”) moves a bar and everything after it · drag empty space to move everything ·
+          click a bar line to select it, Delete unpins it · tinted bars need checking ·
           drag the waveform to scroll, click it to jump · scroll or pinch to zoom
         </p>
       </div>

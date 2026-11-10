@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { importer, model, Settings } from '@coderline/alphatab';
 import { alphaTabPlayOrder, scoreTimingFromAlphaTab } from '@/sync/fromAlphaTab';
 import { buildTimeline } from '@/sync/timeline';
-import { syncPointsToPlayed, tempoMarksToPlayed, unrollRepeats } from '@/sync/unroll';
+import { syncPointsToPlayed, unrollRepeats } from '@/sync/unroll';
 
 const settings = new Settings();
 const fromFile = (path: string) => importer.ScoreLoader.loadScoreFromBytes(new Uint8Array(readFileSync(path)), settings);
@@ -66,6 +66,5 @@ describe('writing repeats out', () => {
       { barIndex: 9, barOccurence: 0, barPosition: 0, millisecondOffset: 9999 },
     ];
     expect(syncPointsToPlayed(order, pts).map((p) => [p.barIndex, p.barOccurence, p.barPosition])).toEqual([[0, 0, 0], [2, 0, 0.5], [4, 0, 0]]);
-    expect(tempoMarksToPlayed(order, [{ barIndex: 0, barOccurence: 1, millisecondOffset: 4000, bpm: 90 }])[0]).toMatchObject({ barIndex: 2, barOccurence: 0 });
   });
 });

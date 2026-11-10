@@ -1,10 +1,9 @@
 // Score side of the sync engine (docs/SYNC_ENGINE.md §4): the score as a flat list of beats in the order
 // they are played. Repeats are already unrolled by the Timeline (alphaTab's own play order), pickup bars
 // only have the beats they really have, and compound meters count dotted quarters.
-import type { SyncPoint } from '@/data/types';
 import type { NoteEvent } from './scoreEvents';
-import type { Anchor, ScoreBeat, ScoreOnset } from './types';
-import { bpmAtBeat, countPattern, type Timeline } from './timeline';
+import type { ScoreBeat, ScoreOnset } from './types';
+import { beatToScoreMs, bpmAtBeat, countPattern, type Timeline } from './timeline';
 
 export function scoreBeats(tl: Timeline): ScoreBeat[] {
   const out: ScoreBeat[] = [];
@@ -12,6 +11,7 @@ export function scoreBeats(tl: Timeline): ScoreBeat[] {
     const { stepQuarters } = countPattern(p.timeSignature);
     for (let i = 0; i * stepQuarters < p.quarters - 1e-9; i++) {
       const quarter = p.startBeat + i * stepQuarters;
+      const quarters = Math.min(stepQuarters, p.quarters - i * stepQuarters);
       out.push({
         index: out.length,
         bar: p.index + 1,
@@ -20,7 +20,8 @@ export function scoreBeats(tl: Timeline): ScoreBeat[] {
         expectedBpm: bpmAtBeat(tl, quarter) / stepQuarters,
         playedIndex: p.index,
         quarter,
-        quarters: Math.min(stepQuarters, p.quarters - i * stepQuarters),
+        quarters,
+        seconds: (beatToScoreMs(tl, quarter + quarters) - beatToScoreMs(tl, quarter)) / 1000,
       });
     }
   }
@@ -62,27 +63,4 @@ export function scoreOnsets(beats: ScoreBeat[], events: NoteEvent[]): ScoreOnset
   }
   // a 6-note chord is louder than one note, but not 6 times
   return [...byPos].map(([scoreBeat, n]) => ({ scoreBeat, weight: Math.sqrt(n) })).sort((a, b) => a.scoreBeat - b.scoreBeat);
-}
-
-/**
- * Anchors -> alphaTab sync points: one per bar start (downbeat) plus the last anchor, so the speed of
- * the last bar is known too. That's what the player and the tempo-mark lanes work with.
- */
-export function anchorsToSyncPoints(tl: Timeline, beats: ScoreBeat[], anchors: Anchor[]): SyncPoint[] {
-  const out: SyncPoint[] = [];
-  const last = anchors[anchors.length - 1];
-  for (const a of anchors) {
-    const b = beats[Math.round(a.scoreBeat)];
-    const onBeat = Math.abs(a.scoreBeat - Math.round(a.scoreBeat)) < 1e-9;
-    if (!b || !((onBeat && b.isDownbeat) || a === last)) continue;
-    const p = tl.played[b.playedIndex]!;
-    const q = scoreBeatToQuarter(beats, a.scoreBeat);
-    out.push({
-      barIndex: p.barIndex,
-      barOccurence: p.occurrence,
-      barPosition: Math.min(1, Math.max(0, (q - p.startBeat) / p.quarters)),
-      millisecondOffset: Math.round(a.time * 1000),
-    });
-  }
-  return out;
 }

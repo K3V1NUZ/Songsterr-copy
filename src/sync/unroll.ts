@@ -4,7 +4,7 @@
 // The score is copied through alphaTab's own JSON form, with the bars in play order and the repeat
 // signs, endings and jumps (D.C./D.S./Coda) removed.
 import { model, type Settings } from '@coderline/alphatab';
-import type { SyncPoint, TempoMark } from '@/data/types';
+import type { SyncPoint } from '@/data/types';
 import { alphaTabPlayOrder } from './fromAlphaTab';
 
 type Js = Map<string, unknown>;
@@ -67,7 +67,7 @@ export function unrollRepeats(score: model.Score, settings: Settings): { score: 
 }
 
 // ---- sync data saved before repeats were written out ----------------------------------------------
-// Older sync points and tempo marks name a bar as (written bar, which time it is played). With repeats
+// Older sync points name a bar as (written bar, which time it is played). With repeats
 // written out, played bar k is bar k, played once.
 
 /** (written bar, occurrence) -> played index, for the given play order. */
@@ -88,14 +88,5 @@ export function syncPointsToPlayed(order: number[], points: SyncPoint[]): SyncPo
   return points.flatMap((p) => {
     const k = at(p.barIndex, p.barOccurence);
     return k === undefined ? [] : [{ ...p, barIndex: k, barOccurence: 0 }];
-  });
-}
-
-/** Tempo marks in written-bar terms -> played-bar terms. */
-export function tempoMarksToPlayed(order: number[], marks: TempoMark[]): TempoMark[] {
-  const at = playedIndexLookup(order);
-  return marks.flatMap((m) => {
-    const k = at(m.barIndex, m.barOccurence);
-    return k === undefined ? [] : [{ ...m, barIndex: k, barOccurence: 0 }];
   });
 }

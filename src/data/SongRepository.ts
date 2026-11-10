@@ -1,3 +1,4 @@
+import type { SyncData } from '@/sync/types';
 import type { FileBlob, FileKind, Id, NewSong, Song, SongQuery, SongSettings, SyncPoint } from './types';
 
 /**
@@ -21,6 +22,13 @@ export interface SongRepository {
 
   getSettings(songId: Id): Promise<SongSettings | undefined>;
   saveSettings(settings: SongSettings): Promise<void>;
+
+  /** The song's anchors-based sync (local copy; see sync/storage.ts for pushing it). */
+  getSync(songId: Id): Promise<SyncData | undefined>;
+  putSync(data: SyncData): Promise<void>;
+  /** Syncs not pushed to the server yet. */
+  listDirtySync(): Promise<SyncData[]>;
+  deleteSync(songId: Id): Promise<void>;
 
   /** Total bytes of stored files (shown to the user; storage quotas matter on phones). */
   usedBytes(): Promise<number>;

@@ -11,7 +11,7 @@ export interface AnalyzeRequest {
   scoreBeats: ScoreBeat[];
   onsets: ScoreOnset[];
   tempoScale: number;
-  /** Not used yet: manual anchors that re-analysis must keep (docs §8). */
+  /** Manual anchors that re-analysis must keep (docs §8). */
   lockedAnchors: Anchor[];
 }
 
@@ -28,7 +28,7 @@ self.onmessage = (e: MessageEvent<AnalyzeRequest>) => {
   if (req.type !== 'analyze') return;
   try {
     const res = analyze(
-      { samples: req.samples, sampleRate: req.sampleRate, scoreBeats: req.scoreBeats, onsets: req.onsets, tempoScale: req.tempoScale },
+      { samples: req.samples, sampleRate: req.sampleRate, scoreBeats: req.scoreBeats, onsets: req.onsets, tempoScale: req.tempoScale, lockedAnchors: req.lockedAnchors },
       (stage, pct) => post({ type: 'progress', stage, pct }),
     );
     for (const w of res.warnings) post({ type: 'warning', code: w.code, detail: w.detail });

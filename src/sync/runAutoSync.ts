@@ -1,19 +1,18 @@
-// Main-thread side of auto-sync: decode the recording, build the score's beats, run the analysis in
-// sync.worker.ts and turn the anchors into the sync points the player uses.
+// Main-thread side of auto-sync: decode the recording, build the score's beats and run the analysis
+// in sync.worker.ts.
 import type { model } from '@coderline/alphatab';
-import type { SyncPoint } from '@/data/types';
 import { decodeForAnalysis } from './decode';
 import { SAMPLE_RATE } from './onset';
 import type { Stage } from './pipeline';
-import { anchorsToSyncPoints, scoreBeats, scoreOnsets } from './scoreBeats';
+import { scoreBeats, scoreOnsets } from './scoreBeats';
 import { scoreNoteEvents } from './scoreEvents';
 import type { AnalyzeRequest, WorkerMessage } from './sync.worker';
 import type { Timeline } from './timeline';
 import type { Anchor, SyncWarning } from './types';
 
 export interface AutoSyncResult {
+  /** One per score beat (manual anchors passed in are kept as they are). */
   anchors: Anchor[];
-  syncPoints: SyncPoint[];
   /** 0..1 */
   confidence: number;
   warnings: SyncWarning[];
@@ -30,6 +29,7 @@ const STAGES: Record<Stage, [number, number, string]> = {
 
 /**
  * @param bpm the recording's BPM entered by the user (quarter notes per minute); 0 = the score's tempo
+ * @param lockedAnchors manual anchors: kept exactly, auto-sync only fills in the beats between them
  */
 export async function runAutoSync(
   blob: Blob,
@@ -37,6 +37,7 @@ export async function runAutoSync(
   timeline: Timeline,
   bpm: number,
   onProgress: (fraction: number, stage: string) => void,
+  lockedAnchors: Anchor[] = [],
 ): Promise<AutoSyncResult> {
   onProgress(0, 'Decoding the recording');
   const audio = await decodeForAnalysis(blob);
@@ -61,12 +62,11 @@ export async function runAutoSync(
       worker.onerror = (e) => reject(new Error(e.message || 'Auto-sync worker failed'));
       // copy the samples: the decoded audio stays cached for the waveform lane
       const samples = audio.samples.slice();
-      const req: AnalyzeRequest = { type: 'analyze', samples, sampleRate: SAMPLE_RATE, scoreBeats: beats, onsets, tempoScale, lockedAnchors: [] };
+      const req: AnalyzeRequest = { type: 'analyze', samples, sampleRate: SAMPLE_RATE, scoreBeats: beats, onsets, tempoScale, lockedAnchors };
       worker.postMessage(req, [samples.buffer]);
     });
     return {
       anchors: res.anchors,
-      syncPoints: anchorsToSyncPoints(timeline, beats, res.anchors),
       confidence: res.confidence,
       warnings,
       localBpm: res.localBpm,

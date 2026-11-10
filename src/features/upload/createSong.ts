@@ -86,7 +86,8 @@ export async function replaceScore(repo: SongRepository, song: Song, name: strin
 export async function replaceRecording(repo: SongRepository, song: Song, name: string, blob: Blob): Promise<Song> {
   const file = await repo.putFile({ kind: 'audio', name, blob });
   const old = song.audioFileId;
-  const next = await repo.updateSong(song.id, { audioFileId: file.id, syncPoints: [], tempoMarks: undefined, syncSource: 'none', syncConfidence: undefined, autoSyncPoints: undefined });
+  const next = await repo.updateSong(song.id, { audioFileId: file.id, syncPoints: [], syncSource: 'none', syncConfidence: undefined });
+  await repo.deleteSync(song.id);
   if (old) await repo.deleteFile(old);
   return next;
 }

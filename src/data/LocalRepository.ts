@@ -1,11 +1,13 @@
 import Dexie, { type EntityTable } from 'dexie';
 import { matchesQuery, newId, sortSongs, type SongRepository } from './SongRepository';
+import type { SyncData } from '@/sync/types';
 import type { FileBlob, FileKind, Id, NewSong, Song, SongQuery, SongSettings, SyncPoint } from './types';
 
 class FretlineDB extends Dexie {
   songs!: EntityTable<Song, 'id'>;
   files!: EntityTable<FileBlob, 'id'>;
   settings!: EntityTable<SongSettings, 'songId'>;
+  sync!: EntityTable<SyncData, 'songId'>;
 
   constructor(name: string) {
     super(name);
@@ -14,6 +16,8 @@ class FretlineDB extends Dexie {
       files: 'id, kind',
       settings: 'songId',
     });
+    // anchors-based sync (docs/SYNC_ENGINE.md §10)
+    this.version(2).stores({ sync: 'songId, updatedAt' });
   }
 }
 
@@ -58,12 +62,13 @@ export class LocalRepository implements SongRepository {
   }
 
   async deleteSong(id: Id): Promise<void> {
-    await this.db.transaction('rw', [this.db.songs, this.db.files, this.db.settings], async () => {
+    await this.db.transaction('rw', [this.db.songs, this.db.files, this.db.settings, this.db.sync], async () => {
       const song = await this.db.songs.get(id);
       if (!song) return;
       const fileIds = [song.scoreFileId, song.audioFileId, ...song.stems.map((s) => s.fileId)].filter((x): x is Id => !!x);
       await this.db.files.bulkDelete(fileIds);
       await this.db.settings.delete(id);
+      await this.db.sync.delete(id);
       await this.db.songs.delete(id);
     });
   }
@@ -88,6 +93,22 @@ export class LocalRepository implements SongRepository {
 
   async saveSettings(settings: SongSettings): Promise<void> {
     await this.db.settings.put(settings);
+  }
+
+  getSync(songId: Id): Promise<SyncData | undefined> {
+    return this.db.sync.get(songId);
+  }
+
+  async putSync(data: SyncData): Promise<void> {
+    await this.db.sync.put(data);
+  }
+
+  async listDirtySync(): Promise<SyncData[]> {
+    return (await this.db.sync.toArray()).filter((d) => d.dirty);
+  }
+
+  async deleteSync(songId: Id): Promise<void> {
+    await this.db.sync.delete(songId);
   }
 
   async usedBytes(): Promise<number> {

@@ -5,10 +5,9 @@
 // The UI only talks to this controller.
 import type { AlphaTabApi, model, synth } from '@coderline/alphatab';
 import { AudioEngine, MAIN, METRONOME, type EngineState } from '@/audio/AudioEngine';
-import type { SyncPoint, TempoMark } from '@/data/types';
+import type { SyncPoint } from '@/data/types';
 import { scoreTimingFromAlphaTab } from '@/sync/fromAlphaTab';
 import { createSyncMap, type SyncMap } from '@/sync/syncMap';
-import { barLengthOverrides } from '@/sync/tempoMarks';
 import { buildTimeline, countPattern, metronomeClicks, TICKS_PER_QUARTER, type Timeline } from '@/sync/timeline';
 import type { AudioMode } from './AlphaTabView';
 import { usePlayer } from './playerStore';
@@ -19,15 +18,12 @@ export class PlayerController {
   private timeline: Timeline | null = null;
   private syncMap: SyncMap | null = null;
   private syncPoints: SyncPoint[];
-  /** Tempo marks behind the sync points (for bars played with another length). */
-  private tempoMarks: TempoMark[] | undefined;
   private raf = 0;
   private lastUi = 0;
   private offs: Array<() => void> = [];
 
-  constructor(readonly mode: AudioMode, syncPoints: SyncPoint[], tempoMarks?: TempoMark[]) {
+  constructor(readonly mode: AudioMode, syncPoints: SyncPoint[]) {
     this.syncPoints = syncPoints;
-    this.tempoMarks = tempoMarks;
     this.engine = mode === 'media' ? new AudioEngine() : null;
     if (this.engine) {
       const e = this.engine;
@@ -105,8 +101,8 @@ export class PlayerController {
   private updateClicks(): void {
     if (!this.engine || !this.timeline || !this.syncMap) return;
     const map = this.syncMap;
-    const lengths = this.tempoMarks ? barLengthOverrides(this.timeline, this.tempoMarks) : undefined;
-    this.engine.setClicks(metronomeClicks(this.timeline, lengths).map((c) => ({ ms: map.beatToMs(c.beat), accent: c.accent })));
+    // one click per score beat, wherever the sync puts it (docs/SYNC_ENGINE.md §7)
+    this.engine.setClicks(metronomeClicks(this.timeline).map((c) => ({ ms: map.beatToMs(c.beat), accent: c.accent })));
   }
 
   /** Count-in tempo and length at a recording position. */
@@ -258,9 +254,8 @@ export class PlayerController {
   }
 
   /** Replaces the sync points live: alphaTab's cursor, the metronome and loops follow at once. */
-  setSyncPoints(points: SyncPoint[], tempoMarks?: TempoMark[]): void {
+  setSyncPoints(points: SyncPoint[]): void {
     this.syncPoints = points;
-    this.tempoMarks = tempoMarks;
     const score = this.api?.score;
     if (score) {
       score.applyFlatSyncPoints(points);

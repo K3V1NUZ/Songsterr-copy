@@ -12,6 +12,8 @@ export interface AlignInput {
   periodOf: (j: number) => number;
   /** Only detected beats in the first this-many seconds can be score beat 0. */
   searchSeconds?: number;
+  /** Manual anchors: the start must agree with them. */
+  locked?: Anchor[];
 }
 
 export interface AlignResult {
@@ -74,6 +76,20 @@ export function findStart(input: AlignInput): { start: number; ambiguous: boolea
     scores.push(s);
   }
   if (!scores.length) return { start: 0, ambiguous: true };
+  // with a manual anchor, only starts that put that beat where the user did are allowed
+  const lock = input.locked?.length ? [...input.locked].sort((a, b) => a.scoreBeat - b.scoreBeat)[0]! : undefined;
+  if (lock) {
+    const off = scores.map((_, k) => {
+      const d = detected[k + Math.round(lock.scoreBeat)];
+      const t = d ? d.time : last.time + (k + lock.scoreBeat - (detected.length - 1)) * input.periodOf(Math.round(lock.scoreBeat));
+      return Math.abs(t - lock.time);
+    });
+    const tol = 0.5 * input.periodOf(Math.max(0, Math.min(beats.length - 1, Math.round(lock.scoreBeat))));
+    let pick = -1;
+    off.forEach((d, k) => { if (d < tol && (pick < 0 || scores[k]! > scores[pick]!)) pick = k; });
+    if (pick < 0) pick = off.indexOf(Math.min(...off));
+    return { start: pick, ambiguous: false };
+  }
   let best = 0;
   for (let k = 1; k < scores.length; k++) if (scores[k]! > scores[best]!) best = k;
   let runnerUp = -Infinity;

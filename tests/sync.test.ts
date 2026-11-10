@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildTimeline, playOrder, beatToScoreMs, metronomeClicks, type BarTiming, type ScoreTiming } from '@/sync/timeline';
-import { createSyncMap, pinSyncPoint, shiftSyncPoints, syncPointsFromOffset } from '@/sync/syncMap';
+import { createSyncMap } from '@/sync/syncMap';
 import type { SyncPoint } from '@/data/types';
 
 const bar = (over: Partial<BarTiming> = {}): BarTiming => ({ quarters: 4, tempoChanges: [], isRepeatStart: false, repeatCount: 0, alternateEndings: 0, ...over });
@@ -86,22 +86,6 @@ describe('sync map', () => {
   it('ignores points that run backwards or point at missing bars', () => {
     const m = createSyncMap(tl, [sp(0, 5000), sp(1, 4000), sp(99, 1)]);
     expect(m.anchors).toHaveLength(1);
-  });
-});
-
-describe('sync point helpers', () => {
-  const tl = buildTimeline(timing([bar(), bar(), bar(), bar()], 60));
-  it('builds points from an offset and speed', () => {
-    const pts = syncPointsFromOffset(tl, 2000, 0.5, 2);
-    expect(pts.map((p) => [p.barIndex, p.millisecondOffset])).toEqual([[0, 2000], [2, 18000], [3, 26000]]);
-  });
-  it('shifts all points', () => {
-    expect(shiftSyncPoints([sp(0, 100), sp(1, 200)], 50).map((p) => p.millisecondOffset)).toEqual([150, 250]);
-  });
-  it('pinning a bar drops points that would cross it', () => {
-    const pts = [sp(0, 0), sp(1, 4000), sp(2, 8000), sp(3, 12000)];
-    const out = pinSyncPoint(tl, pts, sp(1, 9000));
-    expect(out.map((p) => [p.barIndex, p.millisecondOffset])).toEqual([[0, 0], [1, 9000], [3, 12000]]);
   });
 });
 

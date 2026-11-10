@@ -2,9 +2,13 @@
 import { LocalRepository } from '@/data/LocalRepository';
 import type { SongRepository } from '@/data/SongRepository';
 import type { Song } from '@/data/types';
+import { remoteFromEnv, SyncStore } from '@/sync/storage';
 import { detectScoreFormat, loadScore, scoreInfo } from '@/lib/scoreInfo';
 
 export const repo: SongRepository = new LocalRepository();
+
+/** Sync data: local first, pushed to Supabase when it is configured (sync/storage.ts). */
+export const syncStore = new SyncStore(repo, remoteFromEnv(import.meta.env as Record<string, string | undefined>));
 
 /** Stores a score file as a new song (no audio yet). Phase 4's upload flow builds on this. */
 export async function addScoreFile(name: string, bytes: Uint8Array): Promise<Song> {

@@ -15,20 +15,6 @@ export interface SyncPoint {
   millisecondOffset: number;
 }
 
-/** "From this bar on the recording plays at `bpm`" (quarter notes per minute). See sync/tempoMarks.ts. */
-export interface TempoMark {
-  barIndex: number;
-  barOccurence: number;
-  /** Time of the bar start in the recording. Free for the first mark, derived for the others. */
-  millisecondOffset: number;
-  bpm: number;
-  /**
-   * Bar length used from this mark until the next one, as [numerator, denominator] — for when the
-   * recording's bars differ from the score's (e.g. a 2/4 bar written as 4/4). Missing = as written.
-   */
-  timeSignature?: [number, number];
-}
-
 export type ScoreFormat = 'musicxml' | 'mxl' | 'gp3' | 'gp4' | 'gp5' | 'gpx' | 'gp';
 export type FileKind = 'score' | 'audio' | 'stem';
 export type SyncSource = 'none' | 'auto' | 'manual';
@@ -80,19 +66,19 @@ export interface Song {
   durationMs?: number;
   parts: Part[];
   stems: Stem[];
+  /**
+   * For the player (alphaTab), derived from the song's anchors (sync/types.ts SyncData, stored apart and
+   * pushed to the server) — one per score beat, global offset applied.
+   */
   syncPoints: SyncPoint[];
   /**
-   * 'played': sync points and tempo marks count bars in play order (repeats written out, see
+   * 'played': sync points count bars in play order (repeats written out, see
    * sync/unroll.ts). Missing on songs saved before that; their sync data is moved over once.
    */
   barNumbering?: 'played';
-  /** The editable sync (tempo marks); `syncPoints` are derived from them when present. */
-  tempoMarks?: TempoMark[];
   syncSource: SyncSource;
   /** 0..1, how sure auto-sync was. */
   syncConfidence?: number;
-  /** The last auto-sync result, kept so manual edits can be reset to it. */
-  autoSyncPoints?: SyncPoint[];
   /** Increases on every sync-point change (used for conflict handling when shared). */
   syncVersion: number;
   ownerId?: Id;
