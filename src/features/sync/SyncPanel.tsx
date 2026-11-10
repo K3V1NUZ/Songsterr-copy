@@ -12,7 +12,7 @@ import type { Song } from '@/data/types';
 import type { PlayerController } from '@/features/player/PlayerController';
 import { usePlayer } from '@/features/player/playerStore';
 import { fmtTime } from '@/features/player/BottomBar';
-import { anchorsToPlayerPoints, barConfidence, barTempos, isLocked, moveAnchor, shiftAll, shiftFrom, unpin } from '@/sync/anchors';
+import { anchorsToPlayerPoints, barConfidence, barTempos, isLocked, moveAnchor, pinStart, shiftAll, shiftFrom, unpin } from '@/sync/anchors';
 import { decodeForAnalysis, waveformPeaks, type Peaks } from '@/sync/decode';
 import { runAutoSync } from '@/sync/runAutoSync';
 import { ALGO_VERSION } from '@/sync/storage';
@@ -394,13 +394,19 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   };
   const stopTap = () => { setTap(null); setMessage(''); };
 
-  const autoSync = useCallback(async () => {
+  /**
+   * Runs auto-sync, keeping the pinned bars. With `keepStart`, the song's first beat is pinned where it is
+   * now first, so only the rest of the song is synced (for recordings where auto-sync gets the start wrong).
+   */
+  const autoSync = useCallback(async ({ keepStart = false }: { keepStart?: boolean } = {}) => {
     const score = controller.alphaTab?.score;
     if (!recording || !score || !tl || !beats) return;
     setBusy({ fraction: 0, stage: 'Starting' });
     setMessage('');
     try {
-      const locked = history.value.anchors.filter(isLocked);
+      const startWasPinned = !!history.value.anchors[0] && isLocked(history.value.anchors[0]);
+      const base = keepStart ? pinStart(history.value.anchors) : history.value.anchors;
+      const locked = base.filter(isLocked);
       const res = await runAutoSync(recording, score, tl, song.bpm, (fraction, stage) => setBusy({ fraction, stage }), locked);
       const next: SyncState = { anchors: res.anchors, globalOffset: history.value.globalOffset };
       const saved = await saveSync(song, tl, beats, next, {
@@ -415,7 +421,8 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
       setMessage((res.confidence >= 0.6
         ? `Synced automatically (confidence ${pct} %).${low ? ` ${low} bar${low > 1 ? 's' : ''} to check (tinted).` : ''} Play it to check.`
         : `Auto-sync isn't sure (confidence ${pct} %). Drag bar 1 onto the first beat in the waveform, then pin bars where it drifts, and run auto-sync again.`)
-        + (locked.length ? ` Your ${locked.length} pinned bar${locked.length > 1 ? 's were' : ' was'} kept.` : '') + notes);
+        + (keepStart && !startWasPinned ? ' The start was kept where it was (bar 1 is now pinned).' : '')
+        + (locked.length && (!keepStart || startWasPinned || locked.length > 1) ? ` Your ${locked.length} pinned bar${locked.length > 1 ? 's were' : ' was'} kept.` : '') + notes);
       onAutoDone?.(res.confidence);
       const first = res.anchors[0];
       if (first) setView((v) => ({ ...v, startMs: Math.max(-1000, (first.time + next.globalOffset) * 1000 - 2000) }));
@@ -442,6 +449,10 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
         <Button size="sm" variant="primary" onClick={() => void autoSync()} disabled={!!busy || !recording || !ready}
           title={pins ? 'Your pinned bars are kept; auto-sync fills in the bars between them' : undefined}>
           {pins ? 'Auto-sync between pins' : 'Auto-sync'}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => void autoSync({ keepStart: true })} disabled={!!busy || !recording || !ready}
+          title="Keeps the start of the song where it is now and syncs the rest. Drag bar 1 onto the first beat first if it's off.">
+          Sync, keep start
         </Button>
         {busy && (
           <span className="flex items-center gap-2 text-ink-2" role="status">

@@ -1,7 +1,7 @@
 // Anchors: the time map, manual edits, locked anchors and migration (docs/SYNC_ENGINE.md §7, §8).
 import { describe, expect, it } from 'vitest';
 import {
-  anchorsFromSyncPoints, anchorsFromTempo, anchorsToPlayerPoints, barConfidence, barTempos, fitToLocks, moveAnchor, shiftAll, shiftFrom,
+  anchorsFromSyncPoints, anchorsFromTempo, anchorsToPlayerPoints, barConfidence, barTempos, fitToLocks, moveAnchor, pinStart, shiftAll, shiftFrom,
   tempoLabels, unpin,
 } from '@/sync/anchors';
 import { scoreBeats } from '@/sync/scoreBeats';
@@ -63,6 +63,12 @@ describe('manual edits', () => {
     expect(out[4]!.source).toBe('manual');
   });
 
+  it('pins the start where it is', () => {
+    const out = pinStart(steady());
+    expect(out[0]).toMatchObject({ time: 1, source: 'manual', confidence: 1 });
+    expect(out.slice(1).every((a) => a.source === 'auto')).toBe(true);
+  });
+
   it('moves everything, and unpins', () => {
     expect(shiftAll(steady(), -1)[0]!.time).toBe(0);
     const pinned = moveAnchor(steady(), 4, 3);
@@ -77,8 +83,11 @@ describe('locked anchors in re-analysis', () => {
     const out = fitToLocks(auto, locks);
     expect(out[4]).toEqual(locks[0]);
     expect(out[8]).toEqual(locks[1]);
-    expect(out[0]!.time).toBeCloseTo(1.1); // before the first pin: moved to meet it
-    expect(out[12]!.time).toBeCloseTo(7.3); // after the last pin: moved to meet it
+    // outside the pins: moved to meet them, fading out over 8 beats
+    expect(out[3]!.time).toBeCloseTo(2.5 + 0.1 * (7 / 8));
+    expect(out[0]!.time).toBeCloseTo(1 + 0.1 * (4 / 8));
+    expect(out[10]!.time).toBeCloseTo(6 + 0.3 * (6 / 8));
+    expect(out[15]!.time).toBeCloseTo(8.5 + 0.3 * (1 / 8));
     expect(out[6]!.time).toBeCloseTo(3.1 + ((4.02 - 3) / 2) * 2.2); // inside: detected timing kept, stretched
   });
 });

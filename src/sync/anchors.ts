@@ -108,15 +108,24 @@ export function shiftAll(anchors: Anchor[], delta: number): Anchor[] {
   return anchors.map((a) => ({ ...a, time: a.time + delta }));
 }
 
+/** Pins the first beat of the song where it is now (for "Sync, keep start"). */
+export function pinStart(anchors: Anchor[]): Anchor[] {
+  return anchors.map((a, k) => (k === 0 ? { ...a, source: 'manual', confidence: 1 } : a));
+}
+
 /** Removes the pin from anchor i (its time stays). */
 export function unpin(anchors: Anchor[], i: number): Anchor[] {
   return anchors.map((a, k) => (k === i && isLocked(a) ? { ...a, source: 'auto', confidence: 1 } : a));
 }
 
+/** Beats over which the correction outside the pins fades out (see fitToLocks). */
+const LOCK_TAPER_BEATS = 8;
+
 /**
  * Locked anchors survive re-analysis: the fresh auto anchors are fitted between them. Each stretch between
- * two locked anchors is stretched to meet them exactly (keeping the detected beat timing inside); before
- * the first and after the last locked anchor the auto anchors are moved to meet it.
+ * two locked anchors is stretched to meet them exactly (keeping the detected beat timing inside). Before
+ * the first and after the last locked anchor, the anchors next to the pin are moved to meet it, and the
+ * correction fades out over a few beats: further away, the detected beats are trusted again.
  */
 export function fitToLocks(auto: Anchor[], locked: Anchor[]): Anchor[] {
   const locks = locked.filter((a) => a.scoreBeat >= 0 && a.scoreBeat < auto.length).sort((a, b) => a.scoreBeat - b.scoreBeat);
@@ -124,8 +133,9 @@ export function fitToLocks(auto: Anchor[], locked: Anchor[]): Anchor[] {
   const out = auto.map((a) => ({ ...a }));
   const first = locks[0]!, last = locks[locks.length - 1]!;
   const dFirst = first.time - auto[first.scoreBeat]!.time, dLast = last.time - auto[last.scoreBeat]!.time;
-  for (let k = 0; k < first.scoreBeat; k++) out[k]!.time += dFirst;
-  for (let k = last.scoreBeat + 1; k < out.length; k++) out[k]!.time += dLast;
+  const fade = (beats: number) => Math.max(0, 1 - beats / LOCK_TAPER_BEATS);
+  for (let k = 0; k < first.scoreBeat; k++) out[k]!.time += dFirst * fade(first.scoreBeat - k);
+  for (let k = last.scoreBeat + 1; k < out.length; k++) out[k]!.time += dLast * fade(k - last.scoreBeat);
   for (let s = 0; s + 1 < locks.length; s++) {
     const a = locks[s]!, b = locks[s + 1]!;
     const ta = auto[a.scoreBeat]!.time, tb = auto[b.scoreBeat]!.time;

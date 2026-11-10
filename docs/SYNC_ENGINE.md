@@ -402,7 +402,8 @@ How the pieces fit:
   - Shift-drag, or the "Move following bars" toggle, moves a bar and everything after it.
   - Dragging empty space moves everything. The offset slider sets `globalOffset` (±300 ms).
   - Tap mode pins one bar per tap. Delete unpins the selected bar.
-- **Re-analysis** passes the pins as `lockedAnchors`. The start search only accepts starts that agree with the first pin, and `fitToLocks` stretches the result so every pin is met exactly.
+- **Re-analysis** passes the pins as `lockedAnchors`. The start search only accepts starts that agree with the first pin, and `fitToLocks` stretches the result so every pin is met exactly. Outside the pins, the correction fades out over 8 beats, so the beats further away follow the audio.
+- **"Sync, keep start"** pins the song's first beat where it is now, then runs auto-sync. Use it when auto-sync gets the beginning wrong: put bar 1 on the first beat, then sync the rest.
 - **Confidence:** bars with an anchor under 0.5 confidence are tinted, and "N bars to check · next" jumps between them. Each bar shows its tempo, and the tab shows a tempo label where the tempo changes by 3 % or more.
 - **Server:** pushing is on when `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set. Without them, sync stays on the device. The table's row-level-security policies allow signed-in users only, so pushing also needs accounts, which come in phase 5.
 
