@@ -78,10 +78,12 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   const loadedFor = useRef<Timeline | null>(null);
   useEffect(() => {
     if (!tl || loadedFor.current === tl) return;
-    loadedFor.current = tl;
     let live = true;
     void loadSync(song, tl).then((s) => {
-      if (!live) return;
+      // only a load that was applied counts: React (StrictMode, dev) runs this effect, cancels it and
+      // runs it again, and the second run must not be skipped
+      if (!live || loadedFor.current === tl) return;
+      loadedFor.current = tl;
       setBeats(s.beats);
       setAutoAnchors(s.autoAnchors);
       history.reset({ anchors: s.anchors, globalOffset: s.globalOffset });
@@ -407,6 +409,8 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
       const startWasPinned = !!history.value.anchors[0] && isLocked(history.value.anchors[0]);
       const base = keepStart ? pinStart(history.value.anchors) : history.value.anchors;
       const locked = base.filter(isLocked);
+      /** Pins the user made (not the start pinned by this button). */
+      const ownPins = locked.length - (keepStart && !startWasPinned ? 1 : 0);
       const res = await runAutoSync(recording, score, tl, song.bpm, (fraction, stage) => setBusy({ fraction, stage }), locked);
       const next: SyncState = { anchors: res.anchors, globalOffset: history.value.globalOffset };
       const saved = await saveSync(song, tl, beats, next, {
@@ -422,7 +426,7 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
         ? `Synced automatically (confidence ${pct} %).${low ? ` ${low} bar${low > 1 ? 's' : ''} to check (tinted).` : ''} Play it to check.`
         : `Auto-sync isn't sure (confidence ${pct} %). Drag bar 1 onto the first beat in the waveform, then pin bars where it drifts, and run auto-sync again.`)
         + (keepStart && !startWasPinned ? ' The start was kept where it was (bar 1 is now pinned).' : '')
-        + (locked.length && (!keepStart || startWasPinned || locked.length > 1) ? ` Your ${locked.length} pinned bar${locked.length > 1 ? 's were' : ' was'} kept.` : '') + notes);
+        + (ownPins ? ` Your ${ownPins} pinned bar${ownPins > 1 ? 's were' : ' was'} kept.` : '') + notes);
       onAutoDone?.(res.confidence);
       const first = res.anchors[0];
       if (first) setView((v) => ({ ...v, startMs: Math.max(-1000, (first.time + next.globalOffset) * 1000 - 2000) }));
