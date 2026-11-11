@@ -28,7 +28,6 @@ interface Props {
   controller: PlayerController;
   recording: Blob | null;
   onSongChange: (song: Song) => void;
-  onClose: () => void;
   /** Start an auto-sync as soon as the panel opens. */
   autoRun?: boolean;
   /** Called after an auto-sync finished. */
@@ -50,7 +49,7 @@ type Drag =
 const EMPTY: SyncState = { anchors: [], globalOffset: 0 };
 const fmtOffset = (s: number) => `${s >= 0 ? '+' : ''}${Math.round(s * 1000)} ms`;
 
-export function SyncPanel({ song, controller, recording, onSongChange, onClose, autoRun, onAutoDone }: Props) {
+export function SyncPanel({ song, controller, recording, onSongChange, autoRun, onAutoDone }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
@@ -66,6 +65,8 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   const [tap, setTap] = useState<{ next: number } | null>(null);
   const [message, setMessage] = useState('');
   const [menu, setMenu] = useState<'adjust' | 'help' | null>(null);
+  const adjustBtn = useRef<HTMLButtonElement>(null);
+  const helpBtn = useRef<HTMLButtonElement>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const playState = usePlayer((s) => s.state);
   const playerReady = usePlayer((s) => s.ready);
@@ -352,10 +353,10 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   };
   const nudgeAll = (sec: number) => history.set({ ...state, anchors: shiftAll(state.anchors, sec) });
   const unpinSelected = () => { if (selAnchor !== undefined && selPinned) history.set({ ...state, anchors: unpin(state.anchors, selAnchor) }); };
-  /** Pin/Unpin: pins the selected bar where it is (no drag needed), or removes its pin. */
-  const togglePin = () => {
-    if (selAnchor === undefined) return;
-    history.set({ ...state, anchors: selPinned ? unpin(state.anchors, selAnchor) : pin(state.anchors, selAnchor) });
+  /** Pins the selected bar where it is (no drag needed). Delete unpins it. */
+  const pinSelected = () => {
+    if (selAnchor === undefined || selPinned) return;
+    history.set({ ...state, anchors: pin(state.anchors, selAnchor) });
   };
   const unpinRef = useRef(unpinSelected);
   unpinRef.current = unpinSelected;
@@ -511,24 +512,21 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
               <Button size="sm" variant="ghost" onClick={stopTap}>Stop</Button>
             </div>
           ) : null}
-          <button type="button" onClick={() => controller.toggle()} disabled={!playerReady} aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : 'Play'}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-play text-on-play disabled:opacity-40">
-            <Icon name={playing ? 'pause' : 'play'} size={14} />
-          </button>
+          <IconButton size="sm" icon={playing ? 'pause' : 'play'} label={playing ? 'Pause' : 'Play'} onClick={() => controller.toggle()} disabled={!playerReady} />
 
           <div className="flex items-center gap-1">
-            <Button size="sm" variant="ghost" icon="pin" active={selPinned} onClick={togglePin} disabled={selBar === null}
-              title={selBar === null ? 'Click a bar line to select a bar' : selPinned ? `Unpin bar ${selBar}` : `Pin bar ${selBar} where it is`}>
-              {selPinned ? 'Unpin' : 'Pin'}{selBar !== null ? ` ${selBar}` : ''}
+            <Button size="sm" variant="ghost" icon="pin" active={selPinned} onClick={pinSelected} disabled={selBar === null || selPinned}
+              title={selBar === null ? 'Click a bar line to select a bar' : selPinned ? `Bar ${selBar} is pinned (Delete unpins it)` : `Pin bar ${selBar} where it is`}>
+              {selPinned ? 'Pinned' : 'Pin'}{selBar !== null ? ` ${selBar}` : ''}
             </Button>
             <Button size="sm" variant="ghost" active={following} onClick={() => setFollowing((f) => !f)}
               title="Dragging a bar line moves that bar and everything after it (same as Shift-drag)"><span>Move following<span className="max-sm:hidden"> bars</span></span></Button>
             <div className="relative">
-              <Button size="sm" variant="ghost" active={menu === 'adjust'} onClick={() => setMenu((m) => (m === 'adjust' ? null : 'adjust'))}
+              <Button ref={adjustBtn} size="sm" variant="ghost" active={menu === 'adjust'} onClick={() => setMenu((m) => (m === 'adjust' ? null : 'adjust'))}
                 aria-haspopup="menu" aria-expanded={menu === 'adjust'}>
                 Adjust <Icon name="chevronDown" size={14} />
               </Button>
-              <Popover open={menu === 'adjust'} onClose={closeMenu} className="top-full right-0 mt-1 w-72 max-w-[calc(100vw-1.5rem)] p-3 max-sm:fixed max-sm:inset-x-3 max-sm:top-auto max-sm:bottom-16 max-sm:w-auto max-sm:max-w-none">
+              <Popover open={menu === 'adjust'} onClose={closeMenu} anchor={adjustBtn} className="top-full right-0 mt-1 w-72 max-w-[calc(100vw-1.5rem)] p-3 max-sm:fixed max-sm:inset-x-3 max-sm:top-auto max-sm:bottom-16 max-sm:w-auto max-sm:max-w-none">
                 <div className="space-y-3 text-[13px]">
                   <div>
                     <div className="mb-1 text-xs font-medium text-ink-2">Offset (whole song)</div>
@@ -564,21 +562,29 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
             <IconButton size="sm" icon="undo" label="Undo" onClick={history.undo} disabled={!history.canUndo} />
             <IconButton size="sm" icon="redo" label="Redo" onClick={history.redo} disabled={!history.canRedo} />
           </div>
-          <div className="relative flex items-center">
-            <IconButton size="sm" icon="help" label="How to sync" active={menu === 'help'} onClick={() => setMenu((m) => (m === 'help' ? null : 'help'))} />
-            <Popover open={menu === 'help'} onClose={closeMenu} className="top-full right-0 mt-1 w-80 max-w-[calc(100vw-1.5rem)] p-3 max-sm:fixed max-sm:inset-x-3 max-sm:top-auto max-sm:bottom-16 max-sm:w-auto max-sm:max-w-none">
-              <ul className="list-disc space-y-1 pl-4 text-[13px] text-ink-2">
-                <li>Drag a bar line onto its beat in the waveform. That bar gets pinned; the bars up to the next pins stretch.</li>
-                <li>Shift-drag (or “Move following bars”) moves a bar and everything after it. Drag empty space to move everything.</li>
-                <li>Click a bar line to select it. Pin/Unpin (or Delete) pins or unpins it where it is.</li>
-                <li><b className="text-ink">Sync from here</b> keeps everything up to the selected pinned bar and syncs the rest.</li>
-                <li>Tinted bars need checking. Drag the waveform to scroll, click it to jump; scroll or pinch to zoom.</li>
-              </ul>
-            </Popover>
-            <IconButton size="sm" icon="close" label="Close sync tool" onClick={onClose} />
-          </div>
+          <IconButton ref={helpBtn} size="sm" icon="help" label="How to sync" active={menu === 'help'} aria-expanded={menu === 'help'}
+            onClick={() => setMenu((m) => (m === 'help' ? null : 'help'))} />
         </div>
       </div>
+      {menu === 'help' && <div className="fixed inset-0 z-30 bg-black/25 sm:hidden" aria-hidden="true" />}
+      <Popover open={menu === 'help'} onClose={closeMenu} anchor={helpBtn}
+        className="right-3 bottom-full mb-2 w-96 max-w-[calc(100vw-1.5rem)] p-0 max-sm:fixed max-sm:inset-x-4 max-sm:top-[12vh] max-sm:bottom-auto max-sm:w-auto max-sm:max-w-none">
+        <div role="dialog" aria-label="How to sync" className="max-h-[70vh] overflow-y-auto">
+          <header className="flex items-center justify-between border-b border-line py-1.5 pr-1.5 pl-4">
+            <strong className="text-sm">How to sync</strong>
+            <IconButton size="sm" icon="close" label="Close" onClick={closeMenu} />
+          </header>
+          <ul className="list-disc space-y-1.5 py-3 pr-4 pl-8 text-[13px] text-ink-2 max-sm:text-sm">
+            <li><b className="text-ink">Sync all</b> syncs the whole song from the recording (it removes your pins).</li>
+            <li>Drag a bar line onto its beat in the waveform. That bar gets pinned; the bars up to the next pins stretch.</li>
+            <li>Shift-drag (or “Move following bars”) moves a bar and everything after it. Drag empty space to move everything.</li>
+            <li>Click a bar line to select it. <b className="text-ink">Pin</b> pins it where it is; Delete unpins it.</li>
+            <li><b className="text-ink">Sync from here</b> keeps everything up to the selected pinned bar and syncs the rest.</li>
+            <li>Tinted bars need checking: “to check · next” jumps to them.</li>
+            <li>Drag the waveform to scroll, click it to play from there. Scroll or pinch to zoom.</li>
+          </ul>
+        </div>
+      </Popover>
       {message && <p className="px-3 pb-2 text-[13px] text-accent-ink" role="status">{message}</p>}
       <div className="px-3 pb-3">
         {/* the canvas is sized to this box's inner width (no padding, inside the border) */}

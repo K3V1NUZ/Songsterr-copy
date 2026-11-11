@@ -397,10 +397,11 @@ All eight build steps are done.
 How the pieces fit:
 - **Anchors are the source of truth.** They are stored as `SyncData` in their own IndexedDB table (`sync`). The `Song` keeps the alphaTab sync points derived from them, plus the source and confidence for the library.
 - **Older songs** (synced with sync points or tempo marks) are turned into anchors on first open. The bars that carried a sync point become pins when the old sync was made by hand.
-- **The sync panel** has one toolbar. On the left: the sync buttons and the status. On the right: play/pause, Pin/Unpin, "Move following bars", the Adjust menu, zoom, undo/redo, help (?) and close. It wraps on phones.
+- **The sync panel** has one toolbar. On the left: the sync buttons and the status. On the right: play/pause, Pin, "Move following bars", the Adjust menu, zoom, undo/redo and help (?). It wraps on phones. The panel is opened and closed with the sync button in the bottom bar.
   - **Sync all** (primary): a fresh auto-sync of the whole song that ignores pins. It removes every pin, after asking, and Undo brings them back.
   - **Sync from here**: enabled when the selected bar is pinned. The bars before it stay exactly as they are and the bar itself stays where it is. Everything after it is synced again from the audio, keeping the pins after it. It analyses only the audio from 2 s before that bar onward, with the bar passed in as a fixed point (`analyzeFrom` in `pipeline.ts`), so nothing earlier in the song (a wrong start, an intro) can pull the result off.
-  - **Pin/Unpin** pins the selected bar where it is (no drag needed) or removes its pin. Click a bar line to select a bar; Delete also unpins.
+  - **Pin** pins the selected bar where it is (no drag needed); it reads "Pinned" when the bar already is. Click a bar line to select a bar; Delete unpins it.
+  - **Help (?)** toggles a short "How to sync" window: above the panel on desktop, a larger window with a close button on phones. A click outside, or on the ? again, closes it.
   - Dragging a bar line pins it, and the bars up to the neighbouring pins stretch. On a side with no pin, the bars move along instead. Shift-drag, or "Move following bars", moves a bar and everything after it. Dragging empty space moves everything.
   - **Adjust** menu (closed by default): the global offset slider (±300 ms), "Move all bars" (−1 beat, −10 ms, +10 ms, +1 beat), "Tap the downbeats" (one pin per tap) and "Reset to last sync".
   - **Playback:** the panel's play/pause button. Drag the waveform to scroll, click it to choose where to play from.

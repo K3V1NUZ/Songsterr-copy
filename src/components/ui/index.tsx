@@ -1,6 +1,6 @@
 // Base UI components (design direction A2). They only use design tokens
 // (src/index.css), so the look can be adjusted in one place.
-import { forwardRef, useEffect, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
+import { forwardRef, useEffect, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type RefObject } from 'react';
 import { Icon, type IconName } from '../icons';
 
 export const cx = (...c: Array<string | false | null | undefined>) => c.filter(Boolean).join(' ');
@@ -186,16 +186,25 @@ export function SidePanel({ title, side, onClose, children, width = '300px', ove
 }
 
 // ---- Popover (small menu above/below a button) -------------------------------------------
-export function Popover({ open, onClose, children, className }: { open: boolean; onClose: () => void; children: ReactNode; className?: string }) {
+/**
+ * Closes on Escape and on a click outside. Pass the button that opens it as `anchor`, so that button can
+ * toggle it: a click on it then doesn't count as "outside" (which would close and at once reopen it).
+ */
+export function Popover({ open, onClose, children, className, anchor }: {
+  open: boolean; onClose: () => void; children: ReactNode; className?: string; anchor?: RefObject<HTMLElement | null>;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!ref.current?.contains(t) && !anchor?.current?.contains(t)) onClose();
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     const t = setTimeout(() => window.addEventListener('pointerdown', onDown));
     window.addEventListener('keydown', onKey);
     return () => { clearTimeout(t); window.removeEventListener('pointerdown', onDown); window.removeEventListener('keydown', onKey); };
-  }, [open, onClose]);
+  }, [open, onClose, anchor]);
   if (!open) return null;
   return (
     <div ref={ref} className={cx('absolute z-40 min-w-44 rounded-panel border border-line bg-surface p-1 shadow-[0_8px_24px_rgb(0_0_0/0.12)]', className)}>

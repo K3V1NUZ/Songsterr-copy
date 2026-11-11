@@ -217,7 +217,8 @@ export function PlayerPage() {
         </aside>
 
         {/* the tab — the only thing that scrolls */}
-        <main ref={setScrollEl} className="min-w-0 flex-1 touch-pan-y overflow-y-auto">
+        {/* isolate: alphaTab's cursor (z-index 1000) stays inside the tab, under panels and popovers */}
+        <main ref={setScrollEl} className="isolate min-w-0 flex-1 touch-pan-y overflow-y-auto">
           <div className={cx('mx-auto flex flex-col items-center px-3 pt-6 text-center md:px-4', compact && 'max-w-[1200px] md:px-10')}>
             <h1 className="text-[28px] leading-tight font-bold tracking-tight md:text-[34px]">{active.title}</h1>
             {active.artist && (
@@ -239,8 +240,7 @@ export function PlayerPage() {
       {sync.open && mode === 'media' && (
         <SyncPanel song={active} controller={controller} recording={recording} autoRun={sync.autoRun}
           onSongChange={(s: Song) => setCurrent(s)}
-          onAutoDone={(confidence) => { if (confidence >= 0.6 && sync.autoRun) setSync({ open: false, autoRun: false }); }}
-          onClose={() => setSync({ open: false, autoRun: false })} />
+          onAutoDone={(confidence) => { if (confidence >= 0.6 && sync.autoRun) setSync({ open: false, autoRun: false }); }} />
       )}
       <BottomBar tracksOpen={tracksOpen} controller={controller} view={view} onView={setView} zoom={zoom} onZoom={setZoom}
         mixerOpen={mixerOpen} onToggleMixer={() => setMixerOpen((o) => !o)}
