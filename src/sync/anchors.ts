@@ -108,9 +108,14 @@ export function shiftAll(anchors: Anchor[], delta: number): Anchor[] {
   return anchors.map((a) => ({ ...a, time: a.time + delta }));
 }
 
-/** Pins the first beat of the song where it is now (for "Sync, keep start"). */
-export function pinStart(anchors: Anchor[]): Anchor[] {
-  return anchors.map((a, k) => (k === 0 ? { ...a, source: 'manual', confidence: 1 } : a));
+/** Pins anchor i where it is now (Pin button: pin a bar without dragging it). */
+export function pin(anchors: Anchor[], i: number): Anchor[] {
+  return anchors.map((a, k) => (k === i ? { ...a, source: 'manual', confidence: 1 } : a));
+}
+
+/** Removes every pin (before "Sync all", which ignores pins). */
+export function clearPins(anchors: Anchor[]): Anchor[] {
+  return anchors.map((a) => (isLocked(a) ? { ...a, source: 'auto', confidence: 1 } : a));
 }
 
 /** Removes the pin from anchor i (its time stays). */

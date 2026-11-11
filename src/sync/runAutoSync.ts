@@ -27,9 +27,15 @@ const STAGES: Record<Stage, [number, number, string]> = {
   align: [0.9, 1, 'Lining up the score'],
 };
 
+export interface AutoSyncOptions {
+  /** Manual anchors: kept exactly, auto-sync only fills in the beats between them. */
+  lockedAnchors?: Anchor[];
+  /** "Sync from here": keep the song's anchors up to and including `beat`, sync everything after it. */
+  from?: { beat: number; anchors: Anchor[] };
+}
+
 /**
  * @param bpm the recording's BPM entered by the user (quarter notes per minute); 0 = the score's tempo
- * @param lockedAnchors manual anchors: kept exactly, auto-sync only fills in the beats between them
  */
 export async function runAutoSync(
   blob: Blob,
@@ -37,7 +43,7 @@ export async function runAutoSync(
   timeline: Timeline,
   bpm: number,
   onProgress: (fraction: number, stage: string) => void,
-  lockedAnchors: Anchor[] = [],
+  opts: AutoSyncOptions = {},
 ): Promise<AutoSyncResult> {
   onProgress(0, 'Decoding the recording');
   const audio = await decodeForAnalysis(blob);
@@ -62,7 +68,7 @@ export async function runAutoSync(
       worker.onerror = (e) => reject(new Error(e.message || 'Auto-sync worker failed'));
       // copy the samples: the decoded audio stays cached for the waveform lane
       const samples = audio.samples.slice();
-      const req: AnalyzeRequest = { type: 'analyze', samples, sampleRate: SAMPLE_RATE, scoreBeats: beats, onsets, tempoScale, lockedAnchors };
+      const req: AnalyzeRequest = { type: 'analyze', samples, sampleRate: SAMPLE_RATE, scoreBeats: beats, onsets, tempoScale, lockedAnchors: opts.lockedAnchors ?? [], ...(opts.from ? { from: opts.from } : {}) };
       worker.postMessage(req, [samples.buffer]);
     });
     return {

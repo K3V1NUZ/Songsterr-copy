@@ -1,7 +1,7 @@
 // Anchors: the time map, manual edits, locked anchors and migration (docs/SYNC_ENGINE.md §7, §8).
 import { describe, expect, it } from 'vitest';
 import {
-  anchorsFromSyncPoints, anchorsFromTempo, anchorsToPlayerPoints, barConfidence, barTempos, fitToLocks, moveAnchor, pinStart, shiftAll, shiftFrom,
+  anchorsFromSyncPoints, anchorsFromTempo, anchorsToPlayerPoints, barConfidence, barTempos, clearPins, fitToLocks, moveAnchor, pin, shiftAll, shiftFrom,
   tempoLabels, unpin,
 } from '@/sync/anchors';
 import { scoreBeats } from '@/sync/scoreBeats';
@@ -63,10 +63,17 @@ describe('manual edits', () => {
     expect(out[4]!.source).toBe('manual');
   });
 
-  it('pins the start where it is', () => {
-    const out = pinStart(steady());
-    expect(out[0]).toMatchObject({ time: 1, source: 'manual', confidence: 1 });
-    expect(out.slice(1).every((a) => a.source === 'auto')).toBe(true);
+  it('pins a bar where it is, without moving anything', () => {
+    const out = pin(steady(), 4);
+    expect(out[4]).toMatchObject({ time: 3, source: 'manual', confidence: 1 });
+    expect(times(out)).toEqual(times(steady()));
+    expect(out.filter((a) => a.source === 'manual')).toHaveLength(1);
+  });
+
+  it('removes every pin (before "Sync all")', () => {
+    const out = clearPins(pin(pin(steady(), 4), 8));
+    expect(out.every((a) => a.source === 'auto')).toBe(true);
+    expect(times(out)).toEqual(times(steady()));
   });
 
   it('moves everything, and unpins', () => {

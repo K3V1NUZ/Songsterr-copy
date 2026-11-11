@@ -397,14 +397,15 @@ All eight build steps are done.
 How the pieces fit:
 - **Anchors are the source of truth.** They are stored as `SyncData` in their own IndexedDB table (`sync`). The `Song` keeps the alphaTab sync points derived from them, plus the source and confidence for the library.
 - **Older songs** (synced with sync points or tempo marks) are turned into anchors on first open. The bars that carried a sync point become pins when the old sync was made by hand.
-- **Manual sync:**
-  - Dragging a bar line pins it, and the bars up to the neighbouring pins stretch. On a side with no pin, the bars move along instead.
-  - Shift-drag, or the "Move following bars" toggle, moves a bar and everything after it.
-  - Dragging empty space moves everything. The offset slider sets `globalOffset` (±300 ms).
-  - Tap mode pins one bar per tap. Delete unpins the selected bar.
-- **Re-analysis** passes the pins as `lockedAnchors`. The start search only accepts starts that agree with the first pin, and `fitToLocks` stretches the result so every pin is met exactly. Outside the pins, the correction fades out over 8 beats, so the beats further away follow the audio.
-- **"Sync, keep start"** pins the song's first beat where it is now, then runs auto-sync. Use it when auto-sync gets the beginning wrong: put bar 1 on the first beat, then sync the rest.
-- **Confidence:** bars with an anchor under 0.5 confidence are tinted, and "N bars to check · next" jumps between them. Each bar shows its tempo, and the tab shows a tempo label where the tempo changes by 3 % or more.
+- **The sync panel** has one toolbar. On the left: the sync buttons and the status. On the right: play/pause, Pin/Unpin, "Move following bars", the Adjust menu, zoom, undo/redo, help (?) and close. It wraps on phones.
+  - **Sync all** (primary): a fresh auto-sync of the whole song that ignores pins. It removes every pin, after asking, and Undo brings them back.
+  - **Sync from here**: enabled when the selected bar is pinned. The bars before it stay exactly as they are and the bar itself stays where it is. Everything after it is synced again from the audio, keeping the pins after it. It analyses only the audio from 2 s before that bar onward, with the bar passed in as a fixed point (`analyzeFrom` in `pipeline.ts`), so nothing earlier in the song (a wrong start, an intro) can pull the result off.
+  - **Pin/Unpin** pins the selected bar where it is (no drag needed) or removes its pin. Click a bar line to select a bar; Delete also unpins.
+  - Dragging a bar line pins it, and the bars up to the neighbouring pins stretch. On a side with no pin, the bars move along instead. Shift-drag, or "Move following bars", moves a bar and everything after it. Dragging empty space moves everything.
+  - **Adjust** menu (closed by default): the global offset slider (±300 ms), "Move all bars" (−1 beat, −10 ms, +10 ms, +1 beat), "Tap the downbeats" (one pin per tap) and "Reset to last sync".
+  - **Playback:** the panel's play/pause button. Drag the waveform to scroll, click it to choose where to play from.
+  - Each auto-sync is one undo step.
+- **Confidence:** bars with an anchor under 0.5 confidence are tinted, and the small "N to check · next" badge jumps between them. Each bar shows its tempo, and the tab shows a tempo label where the tempo changes by 3 % or more.
 - **Server:** pushing is on when `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set. Without them, sync stays on the device. The table's row-level-security policies allow signed-in users only, so pushing also needs accounts, which come in phase 5.
 
 Differences from the plan above:

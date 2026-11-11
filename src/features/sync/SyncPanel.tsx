@@ -3,16 +3,17 @@
 //   top    = recording waveform (drag to scroll, click to jump there)
 //   bottom = the score's bars (drag a bar line onto its beat in the waveform)
 // Dragging a bar line pins that bar (a manual anchor); the bars between it and the neighbouring pins
-// stretch. Shift-drag (or "Move following") moves the bar and everything after it. The offset slider
-// shifts the whole song a little; tapping pins one bar per tap. Auto-sync keeps the pins and only fills
-// in the beats between them. Every change is previewed live in the tab and saved per song, offline too.
+// stretch. Shift-drag (or "Move following bars") moves the bar and everything after it. Pin/Unpin pins
+// the selected bar where it is. "Sync all" syncs the whole song again from the audio (pins removed);
+// "Sync from here" keeps everything up to the selected pinned bar and syncs the rest. Every change is
+// previewed live in the tab and saved per song, offline too.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Slider } from '@/components/ui';
+import { Icon } from '@/components/icons';
+import { Button, IconButton, Popover, Slider } from '@/components/ui';
 import type { Song } from '@/data/types';
 import type { PlayerController } from '@/features/player/PlayerController';
 import { usePlayer } from '@/features/player/playerStore';
-import { fmtTime } from '@/features/player/BottomBar';
-import { anchorsToPlayerPoints, barConfidence, barTempos, isLocked, moveAnchor, pinStart, shiftAll, shiftFrom, unpin } from '@/sync/anchors';
+import { anchorsToPlayerPoints, barConfidence, barTempos, clearPins, isLocked, moveAnchor, pin, shiftAll, shiftFrom, unpin } from '@/sync/anchors';
 import { decodeForAnalysis, waveformPeaks, type Peaks } from '@/sync/decode';
 import { runAutoSync } from '@/sync/runAutoSync';
 import { ALGO_VERSION } from '@/sync/storage';
@@ -64,11 +65,24 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   const [busy, setBusy] = useState<{ fraction: number; stage: string } | null>(null);
   const [tap, setTap] = useState<{ next: number } | null>(null);
   const [message, setMessage] = useState('');
+  const [menu, setMenu] = useState<'adjust' | 'help' | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const playState = usePlayer((s) => s.state);
+  const playerReady = usePlayer((s) => s.ready);
+  const playing = playState === 'playing' || playState === 'counting-in';
   const drag = useRef<Drag | null>(null);
   const pointers = useRef(new Map<number, number>());
   const pinch = useRef<{ dist: number; msPerPx: number } | null>(null);
   const positionMs = usePlayer((s) => s.positionMs);
-  const theme = useSettings((s) => s.theme); // redraw the canvas when the theme changes
+  const theme = useSettings((s) => s.theme); // redraw the canvas when the theme changes…
+  const [darkClass, setDarkClass] = useState(() => typeof document !== 'undefined' && document.documentElement.classList.contains('dark'));
+  useEffect(() => {
+    // …also when it follows the OS ("system") and the OS switches between light and dark
+    const el = document.documentElement;
+    const mo = new MutationObserver(() => setDarkClass(el.classList.contains('dark')));
+    mo.observe(el, { attributes: true, attributeFilter: ['class'] });
+    return () => mo.disconnect();
+  }, []);
   // re-render when the controller has loaded the score (it's a mutable object)
   const scoreVersion = usePlayer((s) => s.scoreVersion);
   const tl: Timeline | null = controller.scoreTimeline;
@@ -228,7 +242,7 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
       g.fillStyle = col('--c-danger');
       g.fillRect(toX(positionMs) - 1, 0, 2, WAVE_H + BARS_H);
     }
-  }, [width, peaks, view, state, beats, downbeats, conf, tempos, selected, positionMs, recording, toMs, toX, anchorMs, tl, song.bpm, theme]);
+  }, [width, peaks, view, state, beats, downbeats, conf, tempos, selected, positionMs, recording, toMs, toX, anchorMs, tl, song.bpm, theme, darkClass]);
 
   // keep the playhead in view while playing
   useEffect(() => {
@@ -338,6 +352,11 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   };
   const nudgeAll = (sec: number) => history.set({ ...state, anchors: shiftAll(state.anchors, sec) });
   const unpinSelected = () => { if (selAnchor !== undefined && selPinned) history.set({ ...state, anchors: unpin(state.anchors, selAnchor) }); };
+  /** Pin/Unpin: pins the selected bar where it is (no drag needed), or removes its pin. */
+  const togglePin = () => {
+    if (selAnchor === undefined) return;
+    history.set({ ...state, anchors: selPinned ? unpin(state.anchors, selAnchor) : pin(state.anchors, selAnchor) });
+  };
   const unpinRef = useRef(unpinSelected);
   unpinRef.current = unpinSelected;
 
@@ -397,139 +416,184 @@ export function SyncPanel({ song, controller, recording, onSongChange, onClose, 
   const stopTap = () => { setTap(null); setMessage(''); };
 
   /**
-   * Runs auto-sync, keeping the pinned bars. With `keepStart`, the song's first beat is pinned where it is
-   * now first, so only the rest of the song is synced (for recordings where auto-sync gets the start wrong).
+   * Runs auto-sync and takes over its result (one undo step).
+   *  'all':  the whole song from the audio, ignoring pins (they are removed);
+   *  'from': everything after the selected pinned bar; the bars before it and the bar itself stay.
    */
-  const autoSync = useCallback(async ({ keepStart = false }: { keepStart?: boolean } = {}) => {
+  const runSync = useCallback(async (mode: 'all' | 'from') => {
     const score = controller.alphaTab?.score;
     if (!recording || !score || !tl || !beats) return;
+    const cur = history.value;
+    const fromBeat = mode === 'from' ? selAnchor : undefined;
+    if (mode === 'from' && (fromBeat === undefined || !cur.anchors[fromBeat] || !isLocked(cur.anchors[fromBeat]!))) return;
     setBusy({ fraction: 0, stage: 'Starting' });
     setMessage('');
+    setMenu(null);
     try {
-      const startWasPinned = !!history.value.anchors[0] && isLocked(history.value.anchors[0]);
-      const base = keepStart ? pinStart(history.value.anchors) : history.value.anchors;
-      const locked = base.filter(isLocked);
-      /** Pins the user made (not the start pinned by this button). */
-      const ownPins = locked.length - (keepStart && !startWasPinned ? 1 : 0);
-      const res = await runAutoSync(recording, score, tl, song.bpm, (fraction, stage) => setBusy({ fraction, stage }), locked);
-      const next: SyncState = { anchors: res.anchors, globalOffset: history.value.globalOffset };
+      const res = await runAutoSync(recording, score, tl, song.bpm, (fraction, stage) => setBusy({ fraction, stage }),
+        fromBeat !== undefined ? { from: { beat: fromBeat, anchors: cur.anchors } } : {});
+      const next: SyncState = { anchors: res.anchors, globalOffset: cur.globalOffset };
       const saved = await saveSync(song, tl, beats, next, {
-        source: locked.length ? 'manual' : 'auto', confidence: res.confidence, autoAnchors: res.anchors, algoVersion: ALGO_VERSION,
+        source: next.anchors.some(isLocked) ? 'manual' : 'auto', confidence: res.confidence, autoAnchors: res.anchors, algoVersion: ALGO_VERSION,
       });
       onSongChange(saved);
       setAutoAnchors(res.anchors);
-      history.reset(next);
+      history.set(next);
       const pct = Math.round(res.confidence * 100);
       const low = barConfidence(tl, beats, res.anchors).filter((c) => c < LOW_CONFIDENCE).length;
       const notes = res.warnings.map((w) => ` ${w.detail}`).join('');
+      const where = fromBeat !== undefined ? `from bar ${beats[fromBeat]!.bar}` : 'the whole song';
       setMessage((res.confidence >= 0.6
-        ? `Synced automatically (confidence ${pct} %).${low ? ` ${low} bar${low > 1 ? 's' : ''} to check (tinted).` : ''} Play it to check.`
-        : `Auto-sync isn't sure (confidence ${pct} %). Drag bar 1 onto the first beat in the waveform, then pin bars where it drifts, and run auto-sync again.`)
-        + (keepStart && !startWasPinned ? ' The start was kept where it was (bar 1 is now pinned).' : '')
-        + (ownPins ? ` Your ${ownPins} pinned bar${ownPins > 1 ? 's were' : ' was'} kept.` : '') + notes);
+        ? `Synced ${where} (${pct} %).${low ? ` ${low} bar${low > 1 ? 's' : ''} to check.` : ''}`
+        : `Not sure about this sync (${pct} %). Drag a bar onto its beat, pin it and use “Sync from here”.`) + notes);
       onAutoDone?.(res.confidence);
-      const first = res.anchors[0];
+      const first = res.anchors[fromBeat ?? 0];
       if (first) setView((v) => ({ ...v, startMs: Math.max(-1000, (first.time + next.globalOffset) * 1000 - 2000) }));
     } catch (err) {
-      setMessage(`Auto-sync failed: ${err instanceof Error ? err.message : String(err)}`);
+      setMessage(`Sync failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setBusy(null);
     }
-  }, [controller, recording, tl, beats, song, onSongChange, history, onAutoDone]);
+  }, [controller, recording, tl, beats, song, onSongChange, history, onAutoDone, selAnchor]);
+
+  /** "Sync all": a fresh sync of the whole song. Pins are removed (after asking). */
+  const syncAll = () => {
+    if (pins && !window.confirm(`“Sync all” removes your ${pins} pinned bar${pins > 1 ? 's' : ''} and syncs the whole song again. (Undo brings them back.)`)) return;
+    if (pins) history.set({ ...state, anchors: clearPins(state.anchors) });
+    void runSync('all');
+  };
 
   const autoRan = useRef(false);
   useEffect(() => {
-    // wait until the score *and* the recording are loaded, then run once
-    if (autoRun && !autoRan.current && ready && recording && controller.alphaTab?.score) { autoRan.current = true; void autoSync(); }
-  }, [autoRun, ready, recording, autoSync, controller, scoreVersion]);
+    // wait until the score *and* the recording are loaded, then run once (a new song has no pins)
+    if (autoRun && !autoRan.current && ready && recording && controller.alphaTab?.score) { autoRan.current = true; void runSync('all'); }
+  }, [autoRun, ready, recording, runSync, controller, scoreVersion]);
 
-  const sourceText = song.syncSource === 'auto' ? `auto-synced (${Math.round((song.syncConfidence ?? 0) * 100)} %)` : song.syncSource === 'manual' ? 'adjusted by hand' : 'not synced yet';
+  const status = song.syncSource === 'auto' ? `Auto · ${Math.round((song.syncConfidence ?? 0) * 100)} %`
+    : song.syncSource === 'manual' ? 'By hand' : 'Not synced';
+  const canSync = !busy && !!recording && ready;
+  const selBar = selected !== null ? selected + 1 : null;
+  const zoom = (f: number) => setView((v) => ({ ...v, msPerPx: Math.max(1, Math.min(200, v.msPerPx * f)) }));
 
   return (
-    <section className="border-t border-line bg-surface" aria-label="Sync tool">
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-        <strong>Sync</strong>
-        <span className="text-ink-2">{sourceText}{pins ? ` · ${pins} pinned` : ''}</span>
-        <Button size="sm" variant="primary" onClick={() => void autoSync()} disabled={!!busy || !recording || !ready}
-          title={pins ? 'Your pinned bars are kept; auto-sync fills in the bars between them' : undefined}>
-          {pins ? 'Auto-sync between pins' : 'Auto-sync'}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => void autoSync({ keepStart: true })} disabled={!!busy || !recording || !ready}
-          title="Keeps the start of the song where it is now and syncs the rest. Drag bar 1 onto the first beat first if it's off.">
-          Sync, keep start
-        </Button>
-        {busy && (
-          <span className="flex items-center gap-2 text-ink-2" role="status">
-            <span className="h-1.5 w-24 overflow-hidden rounded bg-surface-2"><span className="block h-full bg-accent" style={{ width: `${Math.round(busy.fraction * 100)}%` }} /></span>
-            {busy.stage}…
-          </span>
-        )}
-        {lowBars.length > 0 && !busy && (
-          <Button size="sm" variant="ghost" onClick={nextToCheck} title="Jump to the next bar auto-sync wasn't sure about">
-            <span className="text-warn">● {lowBars.length} bar{lowBars.length > 1 ? 's' : ''} to check</span> · next
+    <section aria-label="Sync tool"
+      className="relative z-10 border-t border-line bg-surface shadow-[0_-8px_20px_-8px_rgb(0_0_0/0.14)] dark:shadow-[0_-8px_20px_-8px_rgb(0_0_0/0.6)]">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 pt-2.5 pb-2">
+        {/* left: sync + status */}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Button size="sm" variant="primary" onClick={syncAll} disabled={!canSync}
+            title="Sync the whole song from the audio. Removes your pins.">Sync all</Button>
+          <Button size="sm" variant="secondary" onClick={() => void runSync('from')} disabled={!canSync || !selPinned}
+            title={selPinned ? `Keep everything up to bar ${selBar} and sync the rest from the audio (pins after it are kept)` : 'Select a pinned bar first (drag it onto its beat, or select it and press Pin)'}>
+            Sync from here
           </Button>
-        )}
-        <span className="flex-1" />
-        <Button size="sm" variant="ghost" onClick={history.undo} disabled={!history.canUndo} aria-label="Undo">↶ Undo</Button>
-        <Button size="sm" variant="ghost" onClick={history.redo} disabled={!history.canRedo} aria-label="Redo">↷ Redo</Button>
-        <Button size="sm" variant="ghost" onClick={() => { if (autoAnchors) { history.set({ ...state, anchors: autoAnchors }); setSelected(null); } }}
-          disabled={!autoAnchors}>Reset to auto-sync</Button>
-        <Button size="sm" variant="ghost" onClick={onClose} aria-label="Close sync tool">✕</Button>
-      </div>
+          {busy ? (
+            <span className="flex items-center gap-2 text-[13px] text-ink-2" role="status">
+              <span className="h-1.5 w-20 overflow-hidden rounded-full bg-surface-2"><span className="block h-full bg-accent" style={{ width: `${Math.round(busy.fraction * 100)}%` }} /></span>
+              {busy.stage}…
+            </span>
+          ) : (
+            <span className="text-[13px] whitespace-nowrap text-ink-2">{status}{pins ? ` · ${pins} pin${pins > 1 ? 's' : ''}` : ''}</span>
+          )}
+          {lowBars.length > 0 && !busy && (
+            <button type="button" onClick={nextToCheck} title="Jump to the next bar auto-sync wasn't sure about"
+              className="inline-flex h-6 items-center gap-1 rounded-full border border-line px-2 text-xs whitespace-nowrap text-ink-2 hover:bg-hover hover:text-ink">
+              <span className="text-warn">●</span>{lowBars.length} to check · next
+            </button>
+          )}
+        </div>
 
-      <div className="flex flex-wrap items-center gap-1 px-3 pb-2 text-sm">
-        <label className="mr-1 flex items-center gap-1.5 text-ink-2" title="Dragging a bar line moves that bar and everything after it (same as Shift-drag)">
-          <input type="checkbox" checked={following} onChange={(e) => setFollowing(e.target.checked)} />
-          Move following bars
-        </label>
-        <span className="text-ink-2">
-          {selected !== null ? `Bar ${selected + 1}${tempos[selected] ? ` · ♩ ${Math.round(tempos[selected]!)}` : ''}${selPinned ? ' · pinned' : ''}` : ''}
-        </span>
-        <Button size="sm" variant="ghost" onClick={unpinSelected} disabled={!selPinned}>Unpin</Button>
-        <span className="mx-2 h-5 w-px bg-line" />
-        <Slider className="w-56" label="Offset" min={-OFFSET_RANGE_MS / 1000} max={OFFSET_RANGE_MS / 1000} step={0.005}
-          value={state.globalOffset} format={fmtOffset} aria-label="Global offset"
-          onChange={(v) => history.preview({ ...state, globalOffset: Math.round(v * 1000) / 1000 })}
-          onPointerUp={() => history.commit()} onKeyUp={() => history.commit()} onBlur={() => history.commit()} />
-        <span className="mx-2 h-5 w-px bg-line" />
-        <span className="text-ink-2">Move all:</span>
-        <Button size="sm" variant="ghost" onClick={() => nudgeAll(-beatSec())}>−1 beat</Button>
-        <Button size="sm" variant="ghost" onClick={() => nudgeAll(-0.01)}>−10 ms</Button>
-        <Button size="sm" variant="ghost" onClick={() => nudgeAll(0.01)}>+10 ms</Button>
-        <Button size="sm" variant="ghost" onClick={() => nudgeAll(beatSec())}>+1 beat</Button>
-        <span className="mx-2 h-5 w-px bg-line" />
-        {tap ? (
-          <>
-            <Button size="sm" variant="primary" onClick={doTap}>Tap (K) · bar {tl?.played[tap.next] ? tap.next + 1 : '–'}</Button>
-            <Button size="sm" variant="ghost" onClick={stopTap}>Stop tapping</Button>
-          </>
-        ) : (
-          <Button size="sm" variant="ghost" onClick={startTap} disabled={!recording || !ready}>Tap the downbeats</Button>
-        )}
-        <span className="mx-2 h-5 w-px bg-line" />
-        <Button size="sm" variant="ghost" onClick={() => setView((v) => ({ ...v, msPerPx: Math.min(200, v.msPerPx * 1.5) }))} aria-label="Zoom out">−</Button>
-        <Button size="sm" variant="ghost" onClick={() => setView((v) => ({ ...v, msPerPx: Math.max(1, v.msPerPx / 1.5) }))} aria-label="Zoom in">+</Button>
-        <Button size="sm" variant="ghost" onClick={() => { controller.seek(Math.max(0, view.startMs)); controller.play(); }}>▶ Play from here</Button>
-        <span className="font-mono text-xs text-ink-2">{fmtTime(view.startMs)}</span>
+        {/* right: playback, editing, view */}
+        <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+          {tap ? (
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant="primary" onClick={doTap}>Tap (K) · bar {tl?.played[tap.next] ? tap.next + 1 : '–'}</Button>
+              <Button size="sm" variant="ghost" onClick={stopTap}>Stop</Button>
+            </div>
+          ) : null}
+          <button type="button" onClick={() => controller.toggle()} disabled={!playerReady} aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : 'Play'}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-play text-on-play disabled:opacity-40">
+            <Icon name={playing ? 'pause' : 'play'} size={14} />
+          </button>
+
+          <div className="flex items-center gap-1">
+            <Button size="sm" variant="ghost" icon="pin" active={selPinned} onClick={togglePin} disabled={selBar === null}
+              title={selBar === null ? 'Click a bar line to select a bar' : selPinned ? `Unpin bar ${selBar}` : `Pin bar ${selBar} where it is`}>
+              {selPinned ? 'Unpin' : 'Pin'}{selBar !== null ? ` ${selBar}` : ''}
+            </Button>
+            <Button size="sm" variant="ghost" active={following} onClick={() => setFollowing((f) => !f)}
+              title="Dragging a bar line moves that bar and everything after it (same as Shift-drag)"><span>Move following<span className="max-sm:hidden"> bars</span></span></Button>
+            <div className="relative">
+              <Button size="sm" variant="ghost" active={menu === 'adjust'} onClick={() => setMenu((m) => (m === 'adjust' ? null : 'adjust'))}
+                aria-haspopup="menu" aria-expanded={menu === 'adjust'}>
+                Adjust <Icon name="chevronDown" size={14} />
+              </Button>
+              <Popover open={menu === 'adjust'} onClose={closeMenu} className="top-full right-0 mt-1 w-72 max-w-[calc(100vw-1.5rem)] p-3 max-sm:fixed max-sm:inset-x-3 max-sm:top-auto max-sm:bottom-16 max-sm:w-auto max-sm:max-w-none">
+                <div className="space-y-3 text-[13px]">
+                  <div>
+                    <div className="mb-1 text-xs font-medium text-ink-2">Offset (whole song)</div>
+                    <Slider min={-OFFSET_RANGE_MS / 1000} max={OFFSET_RANGE_MS / 1000} step={0.005}
+                      value={state.globalOffset} format={fmtOffset} aria-label="Global offset"
+                      onChange={(v) => history.preview({ ...state, globalOffset: Math.round(v * 1000) / 1000 })}
+                      onPointerUp={() => history.commit()} onKeyUp={() => history.commit()} onBlur={() => history.commit()} />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs font-medium text-ink-2">Move all bars</div>
+                    <div className="grid grid-cols-4 gap-1">
+                      <Button size="sm" onClick={() => nudgeAll(-beatSec())}>−1 beat</Button>
+                      <Button size="sm" onClick={() => nudgeAll(-0.01)}>−10 ms</Button>
+                      <Button size="sm" onClick={() => nudgeAll(0.01)}>+10 ms</Button>
+                      <Button size="sm" onClick={() => nudgeAll(beatSec())}>+1 beat</Button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1 border-t border-line pt-3">
+                    <Button size="sm" variant="ghost" onClick={() => { setMenu(null); startTap(); }} disabled={!recording || !ready || !!tap}>Tap the downbeats</Button>
+                    <Button size="sm" variant="ghost" disabled={!autoAnchors}
+                      onClick={() => { if (autoAnchors) { history.set({ ...state, anchors: autoAnchors }); setSelected(null); setMenu(null); } }}>Reset to last sync</Button>
+                  </div>
+                </div>
+              </Popover>
+            </div>
+          </div>
+
+          <div className="flex items-center">
+            <IconButton size="sm" icon="zoomOut" label="Zoom out" onClick={() => zoom(1.5)} />
+            <IconButton size="sm" icon="zoomIn" label="Zoom in" onClick={() => zoom(1 / 1.5)} />
+          </div>
+          <div className="flex items-center">
+            <IconButton size="sm" icon="undo" label="Undo" onClick={history.undo} disabled={!history.canUndo} />
+            <IconButton size="sm" icon="redo" label="Redo" onClick={history.redo} disabled={!history.canRedo} />
+          </div>
+          <div className="relative flex items-center">
+            <IconButton size="sm" icon="help" label="How to sync" active={menu === 'help'} onClick={() => setMenu((m) => (m === 'help' ? null : 'help'))} />
+            <Popover open={menu === 'help'} onClose={closeMenu} className="top-full right-0 mt-1 w-80 max-w-[calc(100vw-1.5rem)] p-3 max-sm:fixed max-sm:inset-x-3 max-sm:top-auto max-sm:bottom-16 max-sm:w-auto max-sm:max-w-none">
+              <ul className="list-disc space-y-1 pl-4 text-[13px] text-ink-2">
+                <li>Drag a bar line onto its beat in the waveform. That bar gets pinned; the bars up to the next pins stretch.</li>
+                <li>Shift-drag (or “Move following bars”) moves a bar and everything after it. Drag empty space to move everything.</li>
+                <li>Click a bar line to select it. Pin/Unpin (or Delete) pins or unpins it where it is.</li>
+                <li><b className="text-ink">Sync from here</b> keeps everything up to the selected pinned bar and syncs the rest.</li>
+                <li>Tinted bars need checking. Drag the waveform to scroll, click it to jump; scroll or pinch to zoom.</li>
+              </ul>
+            </Popover>
+            <IconButton size="sm" icon="close" label="Close sync tool" onClick={onClose} />
+          </div>
+        </div>
       </div>
-      {message && <p className="px-3 pb-2 text-sm text-accent-ink" role="status">{message}</p>}
-      <div ref={wrap} className="px-3 pb-3">
-        <canvas
-          ref={canvas}
-          className="block touch-none rounded-control"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onWheel={onWheel}
-          aria-label="Sync timeline: waveform above, bars below"
-        />
-        <p className="mt-1 text-xs text-muted">
-          Drag a bar line onto its beat in the waveform: that bar is pinned and the bars up to the next pins stretch ·
-          Shift-drag (or “Move following bars”) moves a bar and everything after it · drag empty space to move everything ·
-          click a bar line to select it, Delete unpins it · tinted bars need checking ·
-          drag the waveform to scroll, click it to jump · scroll or pinch to zoom
-        </p>
+      {message && <p className="px-3 pb-2 text-[13px] text-accent-ink" role="status">{message}</p>}
+      <div className="px-3 pb-3">
+        {/* the canvas is sized to this box's inner width (no padding, inside the border) */}
+        <div ref={wrap} className="overflow-hidden rounded-panel border border-line">
+          <canvas
+            ref={canvas}
+            className="block touch-none"
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onWheel={onWheel}
+            aria-label="Sync timeline: waveform above, bars below"
+          />
+        </div>
       </div>
     </section>
   );

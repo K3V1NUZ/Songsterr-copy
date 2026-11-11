@@ -1,7 +1,7 @@
 // The whole auto-sync analysis as one pure function: onset -> tempo -> beatTracker -> align.
 // Runs inside sync.worker.ts in the app and directly in unit tests.
 import { align } from './align';
-import { fitToLocks } from './anchors';
+import { fitToLocks, isLocked } from './anchors';
 import { localBpm, trackBeats } from './beatTracker';
 import { onsetCurve, SAMPLE_RATE } from './onset';
 import { periodCurve, refineSections, tempoSections, type TempoSection } from './tempo';
@@ -96,3 +96,46 @@ export function analyze(input: AnalyzeInput, progress: ProgressFn = () => {}): A
   };
 }
 
+
+/** Audio kept before the bar "Sync from here" starts at, so the onset curve and the start search have context. */
+const FROM_LEAD_SECONDS = 2;
+
+export interface AnalyzeFromInput extends Omit<AnalyzeInput, 'lockedAnchors'> {
+  /** The song's current anchors, one per score beat. */
+  anchors: Anchor[];
+  /** Score beat to sync from. It stays where it is; everything after it is synced again. */
+  fromBeat: number;
+}
+
+/**
+ * "Sync from here": the beats before `fromBeat` stay exactly as they are, the beat at `fromBeat` stays
+ * where it is (pinned), and everything after it is synced again from the audio, keeping the pins after
+ * it. Only the audio from just before that beat on is analysed, so nothing earlier in the song (a wrong
+ * start, an intro) can pull the result off.
+ */
+export function analyzeFrom(input: AnalyzeFromInput, progress: ProgressFn = () => {}): AnalyzeResult {
+  const { anchors: current, fromBeat: i } = input;
+  const from = current[i];
+  if (!from || current.length !== input.scoreBeats.length) throw new Error('Sync from here: the sync does not match the score');
+  const sr = input.sampleRate;
+  const cut = Math.max(0, Math.floor((from.time - FROM_LEAD_SECONDS) * sr));
+  const offset = cut / sr;
+  const beats = input.scoreBeats.slice(i).map((b) => ({ ...b, index: b.index - i }));
+  const onsets = input.onsets.filter((o) => o.scoreBeat >= i - 1e-9).map((o) => ({ ...o, scoreBeat: o.scoreBeat - i }));
+  const locked: Anchor[] = [
+    { scoreBeat: 0, time: from.time - offset, source: 'manual', confidence: 1 },
+    ...current.slice(i + 1).filter(isLocked).map((a) => ({ ...a, scoreBeat: a.scoreBeat - i, time: a.time - offset })),
+  ];
+  const res = analyze({ ...input, samples: input.samples.subarray(cut), scoreBeats: beats, onsets, lockedAnchors: locked }, progress);
+  const after = res.anchors.slice(1).map((a) => ({ ...a, scoreBeat: a.scoreBeat + i, time: a.time + offset }));
+  // the pins after it come back exactly as they were (no rounding through the offset)
+  const pinned = new Map(current.slice(i + 1).filter(isLocked).map((a) => [a.scoreBeat, a] as const));
+  const anchors = [...current.slice(0, i), { ...from, source: 'manual' as const, confidence: 1 }, ...after.map((a) => pinned.get(a.scoreBeat) ?? a)];
+  return {
+    ...res,
+    anchors,
+    localBpm: localBpm(anchors.map((a) => a.time)),
+    warnings: res.warnings.filter((w) => w.code !== 'LOW_CONFIDENCE_START'),
+    detected: res.detected.map((t) => t + offset),
+  };
+}

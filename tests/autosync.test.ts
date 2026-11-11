@@ -6,7 +6,7 @@ import { localBpm, trackBeats } from '@/sync/beatTracker';
 import { fft } from '@/sync/fft';
 import { scoreTimingFromAlphaTab } from '@/sync/fromAlphaTab';
 import { FPS, onsetCurve, SAMPLE_RATE } from '@/sync/onset';
-import { analyze, type AnalyzeResult } from '@/sync/pipeline';
+import { analyze, analyzeFrom, type AnalyzeResult } from '@/sync/pipeline';
 import { anchorsToPlayerPoints } from '@/sync/anchors';
 import { quarterToScoreBeat, scoreBeats, scoreOnsets } from '@/sync/scoreBeats';
 import { scoreNoteEvents, type NoteEvent } from '@/sync/scoreEvents';
@@ -246,5 +246,60 @@ describe('re-analysis with pinned bars', () => {
     expect(res.anchors[0]).toEqual(locked[0]);
     for (let j = 1; j < 50; j++) expect(Math.abs(res.anchors[j]!.time - truth[j + 4]!)).toBeLessThan(0.02);
     expect(res.warnings.some((w) => w.code === 'LOW_CONFIDENCE_START')).toBe(false);
+  });
+});
+
+describe('sync from here', () => {
+  const tlc = plainTimeline(24, 120);
+  const bs = scoreBeats(tlc);
+  const clickOnsets = bs.map((b) => ({ scoreBeat: b.index, weight: 1 }));
+  const truth = Array.from({ length: 96 }, (_, k) => 1 + k * 0.5);
+  const pcm = clickTrack(truth, 52);
+  /** Anchors the way they might look before: the start part hand-tuned, the rest drifted off. */
+  const before = () => truth.map((t, j) => ({
+    scoreBeat: j,
+    time: j < 32 ? t + 0.004 * (j % 3) : t + 0.3 + 0.01 * (j - 32),
+    source: (j === 8 ? 'manual' : 'auto') as 'manual' | 'auto',
+    confidence: j < 32 ? 1 : 0.3,
+  }));
+
+  it('keeps the bars before it exactly, keeps the bar itself, re-syncs the rest', () => {
+    const cur = before();
+    cur[32] = { scoreBeat: 32, time: truth[32]!, source: 'manual', confidence: 1 }; // the user pinned bar 9 on its beat
+    const res = analyzeFrom({ samples: pcm, sampleRate: SR, scoreBeats: bs, onsets: clickOnsets, anchors: cur, fromBeat: 32 });
+    expect(res.anchors).toHaveLength(96);
+    expect(res.anchors.slice(0, 32)).toEqual(cur.slice(0, 32)); // untouched, pins and confidence included
+    expect(res.anchors[32]).toEqual(cur[32]);
+    for (let j = 33; j < 96; j++) expect(Math.abs(res.anchors[j]!.time - truth[j]!)).toBeLessThan(0.02);
+  });
+
+  it('keeps the pins after it', () => {
+    const cur = before();
+    cur[32] = { scoreBeat: 32, time: truth[32]!, source: 'manual', confidence: 1 };
+    cur[64] = { scoreBeat: 64, time: truth[64]! + 0.01, source: 'manual', confidence: 1 };
+    const res = analyzeFrom({ samples: pcm, sampleRate: SR, scoreBeats: bs, onsets: clickOnsets, anchors: cur, fromBeat: 32 });
+    expect(res.anchors[64]).toEqual(cur[64]);
+    for (const j of [40, 50, 70, 90]) expect(Math.abs(res.anchors[j]!.time - truth[j]!)).toBeLessThan(0.02);
+  });
+
+  it('follows the bar where the user put it, even a beat away from where the audio would start it', () => {
+    // a recording with a 4-click count-in the score doesn't have; the user put bar 1 on the first real beat
+    const audio = clickTrack([...[1, 1.5, 2, 2.5], ...truth.map((t) => t + 2)], 56);
+    const cur = truth.map((t, j) => ({ scoreBeat: j, time: t, source: 'auto' as 'auto' | 'manual', confidence: 0.5 })); // all wrong by 2 s
+    cur[0] = { scoreBeat: 0, time: 3, source: 'manual', confidence: 1 };
+    const res = analyzeFrom({ samples: audio, sampleRate: SR, scoreBeats: bs, onsets: clickOnsets, anchors: cur, fromBeat: 0 });
+    expect(res.anchors[0]).toEqual(cur[0]);
+    for (let j = 1; j < 96; j++) expect(Math.abs(res.anchors[j]!.time - (truth[j]! + 2))).toBeLessThan(0.02);
+  });
+
+  it('follows a tempo change after the bar', () => {
+    const t2: number[] = [1];
+    for (let k = 1; k < 96; k++) t2.push(t2[k - 1]! + (k <= 40 ? 0.5 : 60 / 132));
+    const res = analyzeFrom({
+      samples: clickTrack(t2, 50), sampleRate: SR, scoreBeats: bs, onsets: clickOnsets, fromBeat: 40,
+      anchors: t2.map((t, j) => ({ scoreBeat: j, time: j === 40 ? t : t + 0.2, source: (j === 40 ? 'manual' : 'auto') as 'manual' | 'auto', confidence: 1 })),
+    });
+    for (let j = 41; j < 96; j++) expect(Math.abs(res.anchors[j]!.time - t2[j]!)).toBeLessThan(0.02);
+    expect(Math.abs(res.anchors[39]!.time - (t2[39]! + 0.2))).toBeLessThan(1e-9); // before it: untouched
   });
 });
